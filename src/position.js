@@ -47,17 +47,21 @@ class PositionTracker {
           if (Math.abs(err) > 500) this.stats.bigJumps++;
         }
       }
+      const prev = this.anchor;
       this.anchor = { P, at };
       if (this.provisional && this.mode !== 'inicial') this.provisional = false;   // llegó una medida nueva: se acepta
-      if (this.mode === 'inicial') {
-        const cand = s.playing ? P + Math.max(0, now - at) : P;
-        const tooFar = ctx.hadPrevious && cand > (ctx.sinceChangeMs || 0) + 5000;
-        const pastEnd = s.durationMs > 0 && cand > s.durationMs + 15000;
-        if (tooFar || pastEnd) {
-          this.anchor = { P: tooFar ? Math.max(0, ctx.sinceChangeMs || 0) : P, at: now };
-          this.provisional = true;
-          this.mode = 'dato viejo (esperando)';
-        }
+      // Ventana de seguridad: justo después de cambiar de canción, cualquier medida que ya esté
+      // más allá de lo que lleva sonando la canción nueva es de la canción anterior (dato viejo).
+      const since = ctx.sinceChangeMs || 0;
+      const cand = s.playing ? P + Math.max(0, now - at) : P;
+      const early = ctx.hadPrevious && since < 25000;
+      const tooFar = early && cand > since + 5000;
+      const pastEnd = this.mode === 'inicial' && s.durationMs > 0 && cand > s.durationMs + 15000;
+      if (tooFar || pastEnd) {
+        const keep = prev && this.mode !== 'inicial' && (prev.P + Math.max(0, now - prev.at)) <= since + 5000;
+        this.anchor = keep ? prev : { P: tooFar ? Math.max(0, since) : P, at: now };
+        this.provisional = true;
+        this.mode = 'dato viejo (esperando)';
       }
     }
     this.lastP = P; this.lastU = U; this.lastPlaying = s.playing;

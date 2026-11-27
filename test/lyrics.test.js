@@ -152,9 +152,19 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   // llega la lectura buena (P≈0, marca de ahora): se acepta
   const p3 = t.update({ positionMs: 800, updatedMs: base + 1500, playing: true, durationMs: 149466 }, base + 1600, { ...ctx, sinceChangeMs: 2000 });
   assert.ok(Math.abs(p3 - 900) < 50, 'acepta la medida nueva: ' + p3);
-  // un salto legítimo (adelantar la canción) justo después también se acepta
-  const p4 = t.update({ positionMs: 90000, updatedMs: base + 2500, playing: true, durationMs: 149466 }, base + 2600, { ...ctx, sinceChangeMs: 3000 });
-  assert.ok(Math.abs(p4 - 90100) < 50);
+  // un salto legítimo pasada la ventana inicial (30 s) se acepta
+  const p4 = t.update({ positionMs: 90000, updatedMs: base + 30500, playing: true, durationMs: 149466 }, base + 30600, { ...ctx, sinceChangeMs: 31000 });
+  assert.ok(Math.abs(p4 - 90100) < 50, 'salto legítimo tras la ventana: ' + p4);
+  // Dato viejo que además CAMBIA (Windows entrega varias lecturas de la canción anterior): no se acepta
+  const t3 = new PositionTracker();
+  const c3 = { hadPrevious: true, sinceChangeMs: 300 };
+  t3.update({ positionMs: 200000, updatedMs: base - 5000, playing: true, durationMs: 210000 }, base, c3);
+  const q2 = t3.update({ positionMs: 203000, updatedMs: base + 100, playing: true, durationMs: 210000 }, base + 1000, { ...c3, sinceChangeMs: 1300 });
+  assert.ok(q2 < 3000, 'segunda lectura vieja distinta: ' + q2);
+  const q3 = t3.update({ positionMs: 206000, updatedMs: base + 2100, playing: true, durationMs: 210000 }, base + 3000, { ...c3, sinceChangeMs: 3300 });
+  assert.ok(q3 < 5000, 'tercera lectura vieja: ' + q3);
+  const q4 = t3.update({ positionMs: 4200, updatedMs: base + 4100, playing: true, durationMs: 210000 }, base + 4200, { ...c3, sinceChangeMs: 4500 });
+  assert.ok(Math.abs(q4 - 4300) < 50, 'lectura buena: ' + q4);
   // Sin cambio previo y marca imposible (más allá del final): no se queda pegada al final
   const t2 = new PositionTracker();
   const p5 = t2.update({ positionMs: 5000, updatedMs: base - 900000, playing: true, durationMs: 149466 }, base, { hadPrevious: false, sinceChangeMs: 0 });
