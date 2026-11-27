@@ -6,9 +6,10 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { analyze, learnFills, median } = require('./onset');
+const { analyze, learnFills, alignByCorrelation, median } = require('./onset');
 
-const OFFSET_STAGE_MS = 45000;           // tiempo máximo para el ajuste del arranque
+const OFFSET_STAGE_MS = 45000;           // tiempo máximo para el ajuste rápido del arranque
+const ALIGN_STAGE_MS = 170000;           // tiempo máximo para alinear toda la letra con el audio
 const MAX_CAPTURE_MS = 12 * 60 * 1000;   // tope de seguridad por canción
 const RETRY_AFTER_MS = 7 * 24 * 3600 * 1000;
 const GOOD_COVERAGE = 0.7;               // si ya hay tanto aprendido, no se vuelve a escuchar
@@ -65,7 +66,7 @@ class SmartManager {
     else if (this.o.hasManual(key)) this.offsetNote = 'omitido (ajuste a mano)';
     if (f) this.learnNote = `${f.fills.length} líneas aprendidas (${Math.round(f.coverage * 100)} %)`;
     if (!needOffset && !needFills) { this.status = 'canción ya aprendida'; return; }
-    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needFills, done: false };
+    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needAlign: needOffset, alignedAt: 0, needFills, done: false };
     this.status = 'arrancando captura';
     this._openWindow();
   }
@@ -77,7 +78,7 @@ class SmartManager {
     s.lines = lines || [];
     const first = s.lines.find((l) => l.text && /[\p{L}\p{N}]/u.test(l.text));
     s.firstLineMs = first ? first.t : null;
-    if (s.needOffset && (s.firstLineMs == null || s.firstLineMs > 40000)) { s.needOffset = false; this.offsetNote = 'omitido (sin primera línea útil)'; }
+    if (s.needOffset && (s.firstLineMs == null || s.firstLineMs > 40000)) s.needOffset = false;   // sin primera línea útil: solo la alineación completa
     this._maybeAnalyzeOffset();
     this._checkDone();
   }
@@ -88,14 +89,15 @@ class SmartManager {
     if (!s || s.done) return;
     s.log.push({ t: now, c: posMs - now, pl: !!playing });
     if (s.log.length > 4000) s.log.shift();
-    if (s.needOffset && playing) {
+    if (s.needOffset && playing) {                      // un salto de posición estropea solo el ajuste rápido del arranque
       const recent = s.log.filter((x) => x.pl).slice(-12);
       if (recent.length >= 10) {
         const c = median(recent.map((x) => x.c));
-        if (Math.abs(recent[recent.length - 1].c - c) > 1500) { s.needOffset = false; this.offsetNote = 'cancelado (salto de posición)'; }
+        if (Math.abs(recent[recent.length - 1].c - c) > 1500) s.needOffset = false;
       }
     }
-    if (s.needOffset && now - s.startedAt > OFFSET_STAGE_MS) { s.needOffset = false; this.offsetNote = 'cancelado (tiempo agotado)'; }
+    if (s.needOffset && now - s.startedAt > OFFSET_STAGE_MS) s.needOffset = false;
+    if (s.needAlign && now - s.startedAt > ALIGN_STAGE_MS) this._giveUpAlign();
     if (now - s.startedAt > MAX_CAPTURE_MS) this._finish();
     else this._checkDone();
   }
@@ -105,7 +107,7 @@ class SmartManager {
   // ---- interno ----
   _checkDone() {
     const s = this.s;
-    if (s && !s.done && !s.needOffset && !s.needFills) this._finish();
+    if (s && !s.done && !s.needOffset && !s.needAlign && !s.needFills) this._finish();
   }
 
   _openWindow() {
@@ -164,26 +166,47 @@ class SmartManager {
     return out;
   }
 
+  _giveUpAlign() {
+    const s = this.s;
+    if (!s || !s.needAlign) return;
+    s.needAlign = false; s.needOffset = false;
+    if (!this.db[s.key]) { this.db[s.key] = { at: Date.now(), applied: false, reason: 'no se pudo alinear' }; this._save(this.file, this.db); }
+    if (!this.offsetNote) this.offsetNote = 'sin cambios (no se pudo alinear)';
+  }
+
+  _decide(s, rec, note) {
+    s.needOffset = false; s.needAlign = false;
+    this.db[s.key] = { at: Date.now(), ...rec };
+    this._save(this.file, this.db);
+    this.offsetNote = note;
+    this.status = s.needFills ? 'aprendiendo el relleno' : 'terminado';
+  }
+
   _maybeAnalyzeOffset() {
     const s = this.s;
-    if (!s || s.done || !s.needOffset || s.firstLineMs == null || s.hops.length < 100 || s.log.length < 8) return;
-    const hops = this._toHops(s);
-    if (!hops.length) return;
-    if (hops[hops.length - 1].p < s.firstLineMs + 1200) return;              // aún no hay audio posterior a la primera línea
-    const res = analyze(hops, s.firstLineMs);
-    this.o.log(`modo inteligente (arranque): ${JSON.stringify(res)}`);
-    const key = s.key;
-    s.needOffset = false;
-    if (res.apply && this.o.enabled() && !this.o.hasManual(key)) {
-      this.db[key] = { at: Date.now(), applied: true, offsetMs: res.offsetMs, confidence: res.confidence };
-      this.o.apply(key, res.offsetMs, res);
-      this.offsetNote = `aplicado ${res.offsetMs} ms (confianza ${res.confidence})`;
-    } else {
-      this.db[key] = { at: Date.now(), applied: false, reason: res.reason || 'sin motivo' };
-      this.offsetNote = `sin cambios (${res.reason || '?'})`;
+    if (!s || s.done || !(s.needOffset || s.needAlign) || !s.lines || s.hops.length < 100 || s.log.length < 8) return;
+    const live = this.o.enabled() && !this.o.hasManual(s.key);
+    // 1) Ajuste rápido: entrada de la voz frente a la primera línea (solo si hay calma antes de cantar)
+    if (s.needOffset && s.firstLineMs != null) {
+      const hops = this._toHops(s);
+      if (hops.length && hops[hops.length - 1].p >= s.firstLineMs + 1200) {
+        const res = analyze(hops, s.firstLineMs);
+        this.o.log(`modo inteligente (arranque): ${JSON.stringify(res)}`);
+        s.needOffset = false;
+        if (res.apply && live) { this.o.apply(s.key, res.offsetMs, res); this._decide(s, { applied: true, offsetMs: res.offsetMs, confidence: res.confidence }, `aplicado ${res.offsetMs} ms (confianza ${res.confidence})`); return; }
+        if (res.reason === 'ya va bien') { this._decide(s, { applied: false, reason: 'ya va bien' }, 'sin cambios (ya iba bien)'); return; }
+      }
     }
-    this._save(this.file, this.db);
-    this.status = s.needFills ? 'aprendiendo el relleno' : 'terminado';
+    // 2) Alineación de toda la letra con las entradas de voz (cada ~10 s de audio nuevo, a partir de 45 s)
+    if (s.needAlign && s.hops.length - s.alignedAt >= 500 && s.hops.length >= 2250) {
+      s.alignedAt = s.hops.length;
+      const hops = this._toHops(s);
+      const res = alignByCorrelation(hops, s.lines);
+      this.o.log(`modo inteligente (alineación): ${JSON.stringify(res)}`);
+      if (res.apply && live) { this.o.apply(s.key, res.offsetMs, res); this._decide(s, { applied: true, offsetMs: res.offsetMs, confidence: res.confidence }, `aplicado ${res.offsetMs} ms por alineación (confianza ${res.confidence})`); return; }
+      if (res.reason === 'ya va bien') { this._decide(s, { applied: false, reason: 'ya va bien' }, 'sin cambios (ya iba bien)'); return; }
+      this.offsetNote = `buscando… (${res.reason || 'sin datos'})`;
+    }
   }
 
   /** Cierra la sesión: si se estaba aprendiendo el relleno, analiza ahora lo escuchado y lo guarda. */

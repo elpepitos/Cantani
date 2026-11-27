@@ -297,6 +297,7 @@ function buildReport() {
     `Pista: "${t.artist || ''}" - "${t.title || ''}" · letra: ${t.lyricsState} · fuente: ${t.lyricsSourceName || ''} · respaldo=${!!t.backup} · otra versión=${!!t.approx}`,
     `Ajustes: fuente de letras=${st.lyricsSource} · global=${st.syncOffsetMs} ms · monitor=${st.display}`,
     `Modo inteligente: ${smartMgr ? smartMgr.describe() : '?'}`,
+    `Estabilidad: correcciones ${state.tracker.stats.corrections} · mayor ${state.tracker.stats.maxAbsMs} ms · saltos >0,5 s: ${state.tracker.stats.bigJumps} · mayor hueco ${state.gapMax || 0} ms · ajuste canción ${state.songOffsetMs} ms`,
     `Sesiones de medios que Windows ve AHORA: ${state.sessionsNow.length ? state.sessionsNow.join(' | ') : '(ninguna)'}`,
     `Reproductores vistos desde que abrió la app: ${[...state.sessionsSeen].join(' | ') || '(ninguno)'}`,
     'Registro del lector:',

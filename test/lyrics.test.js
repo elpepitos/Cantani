@@ -243,6 +243,41 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   assert.ok(r3.fills.length >= 3 && r3.fills.length <= 4, 'cobertura parcial: ' + r3.fills.length);
 }
 
+
+// Modo inteligente: alinear toda la letra con las entradas de voz (letras desfasadas varios segundos)
+{
+  const { alignByCorrelation } = require('../src/smart/onset');
+  let seed = 21; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const lin = (d) => Math.pow(10, d / 20);
+  // 22 líneas con huecos irregulares (incluye un tramo instrumental de 16 s)
+  const lines = []; let t = 0;
+  for (let i = 0; i < 22; i++) { lines.push({ t, text: 'l' + i }); t += i === 9 ? 16000 : 2500 + Math.floor(rnd() * 4500); }
+  const END = t + 4000;
+  const build = (shift, bed = -50) => {                        // la letra va `shift` ms por delante del audio
+    const h = [];
+    for (let p = 0; p <= END; p += 20) {
+      const on = lines.some((l) => p >= l.t - shift && p < l.t - shift + 1800);
+      h.push({ p, v: lin((on ? -26 : bed) + (rnd() - .5) * 2), a: 1 });
+    }
+    return h;
+  };
+  for (const shift of [3700, -2200, 6100]) {
+    const r = alignByCorrelation(build(shift), lines);
+    assert.ok(r.apply, 'shift ' + shift + ': ' + JSON.stringify(r));
+    assert.ok(Math.abs(r.offsetMs - shift) <= 80, 'offset ≈ ' + shift + ': ' + r.offsetMs);
+  }
+  // ya alineada: no toca nada
+  assert.ok(!alignByCorrelation(build(40), lines).apply);
+  // sin voz distinguible (ruido plano): no se fía
+  const plano = []; for (let p = 0; p <= END; p += 20) plano.push({ p, v: lin(-40 + (rnd() - .5) * 2), a: 1 });
+  assert.ok(!alignByCorrelation(plano, lines).apply);
+  // letra perfectamente periódica y voz idéntica: ambiguo, no debe aplicar una corrección arbitraria
+  const per = []; for (let i = 0; i < 22; i++) per.push({ t: i * 4000, text: 'p' + i });
+  const hp = []; for (let p = 0; p <= 22 * 4000; p += 20) hp.push({ p, v: lin((per.some((l) => p >= l.t - 2000 && p < l.t - 2000 + 1800) ? -26 : -50) + (rnd() - .5) * 2), a: 1 });
+  const rp = alignByCorrelation(hp, per);
+  assert.ok(!rp.apply, 'ambiguo: ' + JSON.stringify(rp));
+}
+
 // OffsetStore.learned
 {
   const os = require('../src/offsets');

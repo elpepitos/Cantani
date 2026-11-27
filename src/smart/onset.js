@@ -173,4 +173,73 @@ function learnFills(hops, lines, offsetMs = 0, opt = {}) {
   return out;
 }
 
-module.exports = { findOnsets, analyze, learnFills, smooth, db, median };
+
+/**
+ * Alinea TODA la letra con el audio: busca el desplazamiento para el que más inicios de línea coinciden
+ * con entradas de voz (subidas de energía en la banda de la voz). Sirve con intros instrumentales
+ * y cuando la primera línea está en el segundo 0.
+ * Devuelve { offsetMs, confidence, z, ratio, lines, apply } (offsetMs: tiempo de letra = tiempo de audio + offsetMs).
+ */
+function alignByCorrelation(hops, lines, opt = {}) {
+  const o = { maxShiftMs: 12000, tolMs: 140, minLines: 8, minZ: 5, minRatio: 1.3, minCorrectionMs: 150, minCoverageMs: 40000, ...opt };
+  const STEP = 20;
+  if (!hops || hops.length < 1500) return { reason: 'poco audio' };
+  const p0 = hops[0].p, pEnd = hops[hops.length - 1].p;
+  if (pEnd - p0 < o.minCoverageMs) return { reason: 'poco audio' };
+  const N = Math.floor((pEnd - p0) / STEP) + 1;
+  const dvRaw = new Array(hops.length);
+  for (let i = 0; i < hops.length; i++) dvRaw[i] = db(hops[i].v);
+  const dv = smooth(dvRaw, 5);
+  // rejilla uniforme de 20 ms con "subida de energía" (positiva, tope 12 dB) y marca de cobertura
+  const flux = new Float32Array(N), seen = new Uint8Array(N);
+  const lvl = new Float32Array(N).fill(NaN);
+  for (let i = 0; i < hops.length; i++) { const g = Math.round((hops[i].p - p0) / STEP); if (g >= 0 && g < N) { lvl[g] = dv[i]; seen[g] = 1; } }
+  const K = 6;                                   // compara 120 ms después con 120 ms antes
+  for (let g = K; g < N - K; g++) {
+    if (!seen[g - K] || !seen[g + K]) continue;
+    const d = lvl[g + K] - lvl[g - K];
+    flux[g] = d > 0 ? Math.min(12, d) : 0;
+  }
+  // dilatación: el máximo de la subida en ±tol (tolera pequeños errores de la letra)
+  const R = Math.round(o.tolMs / STEP);
+  const dil = new Float32Array(N);
+  for (let g = 0; g < N; g++) { let m = 0; for (let k = Math.max(0, g - R); k <= Math.min(N - 1, g + R); k++) if (flux[k] > m) m = flux[k]; dil[g] = m; }
+  const isSung = (l) => l && l.text && /[\p{L}\p{N}]/u.test(l.text);
+  const ts = lines.filter(isSung).map((l) => l.t);
+  if (ts.length < o.minLines) return { reason: 'pocas líneas' };
+
+  const shifts = []; const scores = [];
+  for (let d = -o.maxShiftMs; d <= o.maxShiftMs; d += STEP) {
+    let sum = 0, cnt = 0;
+    for (const t of ts) {
+      const g = Math.round((t - d - p0) / STEP);
+      if (g < R + 2 || g > N - R - 3) continue;
+      sum += dil[g]; cnt++;
+    }
+    shifts.push(d); scores.push(cnt >= o.minLines ? sum / cnt : NaN);
+  }
+  const valid = scores.filter(Number.isFinite);
+  if (valid.length < 40) return { reason: 'pocas líneas dentro del audio' };
+  const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
+  const sd = Math.sqrt(valid.reduce((a, b) => a + (b - mean) * (b - mean), 0) / valid.length) || 1e-6;
+  let bi = -1;
+  for (let i = 0; i < scores.length; i++) if (Number.isFinite(scores[i]) && (bi < 0 || scores[i] > scores[bi])) bi = i;
+  const best = scores[bi], z = (best - mean) / sd;
+  // el mejor "rival": máximo a más de 600 ms del ganador
+  let second = -Infinity;
+  for (let i = 0; i < scores.length; i++) if (Number.isFinite(scores[i]) && Math.abs(shifts[i] - shifts[bi]) > 600 && scores[i] > second) second = scores[i];
+  const ratio = second > 0 ? best / second : 9;
+  // el máximo es una meseta (la subida y la tolerancia la ensanchan): se toma el centro de la meseta
+  let lo = bi, hi = bi;
+  while (lo > 0 && Number.isFinite(scores[lo - 1]) && scores[lo - 1] >= best * 0.96) lo--;
+  while (hi < scores.length - 1 && Number.isFinite(scores[hi + 1]) && scores[hi + 1] >= best * 0.96) hi++;
+  const off = (shifts[lo] + shifts[hi]) / 2;
+  const offsetMs = Math.round(off / 10) * 10;
+  const confidence = Math.max(0, Math.min(1, 0.5 * Math.min(1, (z - 3) / 6) + 0.5 * Math.min(1, (ratio - 1) / 0.6)));
+  const res = { offsetMs, confidence: +confidence.toFixed(2), z: +z.toFixed(1), ratio: +ratio.toFixed(2), lines: ts.length };
+  if (Math.abs(offsetMs) < o.minCorrectionMs) return { ...res, reason: 'ya va bien' };
+  if (z < o.minZ || ratio < o.minRatio) return { ...res, reason: 'alineación poco clara' };
+  return { ...res, apply: true };
+}
+
+module.exports = { findOnsets, analyze, learnFills, alignByCorrelation, smooth, db, median };
