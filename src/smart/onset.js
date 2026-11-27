@@ -242,4 +242,22 @@ function alignByCorrelation(hops, lines, opt = {}) {
   return { ...res, apply: true };
 }
 
-module.exports = { findOnsets, analyze, learnFills, alignByCorrelation, smooth, db, median };
+
+/**
+ * Alineaciones repetidas: si las últimas `n` pasadas dan el mismo desplazamiento (±tol) y cada una supera un mínimo
+ * más bajo que el exigido a una sola pasada, el resultado es fiable (el ruido no se repite igual).
+ * hist: [{ offsetMs, z, ratio }]. Devuelve { offsetMs, confidence, apply } o null.
+ */
+function stableAlignment(hist, opt = {}) {
+  const o = { n: 3, tolMs: 120, minZ: 3, minRatio: 1.18, minCorrectionMs: 150, ...opt };
+  const last = (hist || []).slice(-o.n);
+  if (last.length < o.n) return null;
+  if (!last.every((h) => Number.isFinite(h.offsetMs) && h.z >= o.minZ && h.ratio >= o.minRatio)) return null;
+  const offs = last.map((h) => h.offsetMs);
+  if (Math.max(...offs) - Math.min(...offs) > o.tolMs) return null;
+  const offsetMs = Math.round(offs.reduce((a, b) => a + b, 0) / offs.length / 10) * 10;
+  if (Math.abs(offsetMs) < o.minCorrectionMs) return null;
+  return { offsetMs, confidence: +Math.min(1, 0.4 + 0.1 * last.length).toFixed(2), apply: true, stable: true };
+}
+
+module.exports = { findOnsets, analyze, learnFills, alignByCorrelation, stableAlignment, smooth, db, median };

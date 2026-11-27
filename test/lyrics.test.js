@@ -278,6 +278,18 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   assert.ok(!rp.apply, 'ambiguo: ' + JSON.stringify(rp));
 }
 
+// Alineaciones repetidas (caso real "FEEL ME??": -2340 ms en 4 pasadas con confianza baja)
+{
+  const { stableAlignment } = require('../src/smart/onset');
+  const h = [{ offsetMs: -2340, z: 3.5, ratio: 1.27 }, { offsetMs: -2340, z: 3.7, ratio: 1.26 }, { offsetMs: -2350, z: 3.8, ratio: 1.27 }];
+  const r = stableAlignment(h);
+  assert.ok(r && r.apply && Math.abs(r.offsetMs + 2340) <= 10, JSON.stringify(r));
+  assert.strictEqual(stableAlignment(h.slice(0, 2)), null);                                       // aún pocas pasadas
+  assert.strictEqual(stableAlignment([{ offsetMs: -2340, z: 3.5, ratio: 1.27 }, { offsetMs: 900, z: 3.5, ratio: 1.27 }, { offsetMs: -2340, z: 3.5, ratio: 1.27 }]), null);   // no coinciden
+  assert.strictEqual(stableAlignment([{ offsetMs: -2340, z: 2.1, ratio: 1.27 }, { offsetMs: -2340, z: 2.1, ratio: 1.27 }, { offsetMs: -2340, z: 2.1, ratio: 1.27 }]), null);  // demasiado débil
+  assert.strictEqual(stableAlignment([{ offsetMs: 60, z: 4, ratio: 1.3 }, { offsetMs: 60, z: 4, ratio: 1.3 }, { offsetMs: 60, z: 4, ratio: 1.3 }]), null);                       // ya iba bien
+}
+
 // OffsetStore.learned
 {
   const os = require('../src/offsets');

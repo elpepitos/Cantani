@@ -6,7 +6,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { analyze, learnFills, alignByCorrelation, median } = require('./onset');
+const { analyze, learnFills, alignByCorrelation, stableAlignment, median } = require('./onset');
 
 const OFFSET_STAGE_MS = 45000;           // tiempo máximo para el ajuste rápido del arranque
 const ALIGN_STAGE_MS = 170000;           // tiempo máximo para alinear toda la letra con el audio
@@ -66,7 +66,7 @@ class SmartManager {
     else if (this.o.hasManual(key)) this.offsetNote = 'omitido (ajuste a mano)';
     if (f) this.learnNote = `${f.fills.length} líneas aprendidas (${Math.round(f.coverage * 100)} %)`;
     if (!needOffset && !needFills) { this.status = 'canción ya aprendida'; return; }
-    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needAlign: needOffset, alignedAt: 0, needFills, done: false };
+    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needAlign: needOffset, alignedAt: 0, alignHist: [], needFills, done: false };
     this.status = 'arrancando captura';
     this._openWindow();
   }
@@ -203,7 +203,9 @@ class SmartManager {
       const hops = this._toHops(s);
       const res = alignByCorrelation(hops, s.lines);
       this.o.log(`modo inteligente (alineación): ${JSON.stringify(res)}`);
-      if (res.apply && live) { this.o.apply(s.key, res.offsetMs, res); this._decide(s, { applied: true, offsetMs: res.offsetMs, confidence: res.confidence }, `aplicado ${res.offsetMs} ms por alineación (confianza ${res.confidence})`); return; }
+      if (Number.isFinite(res.offsetMs) && Number.isFinite(res.z)) s.alignHist.push({ offsetMs: res.offsetMs, z: res.z, ratio: res.ratio });
+      const rep = res.apply ? res : stableAlignment(s.alignHist);          // una pasada clara, o varias pasadas que coinciden
+      if (rep && rep.apply && live) { this.o.apply(s.key, rep.offsetMs, rep); this._decide(s, { applied: true, offsetMs: rep.offsetMs, confidence: rep.confidence }, `aplicado ${rep.offsetMs} ms por alineación${rep.stable ? ' repetida' : ''} (confianza ${rep.confidence})`); return; }
       if (res.reason === 'ya va bien') { this._decide(s, { applied: false, reason: 'ya va bien' }, 'sin cambios (ya iba bien)'); return; }
       this.offsetNote = `buscando… (${res.reason || 'sin datos'})`;
     }
