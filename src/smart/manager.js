@@ -21,8 +21,8 @@ class SmartManager {
    */
   constructor(electron, opts) {
     this.e = electron; this.o = opts;
-    this.file = path.join(opts.dir, 'smart-analysis.json');
-    this.fillsFile = path.join(opts.dir, 'smart-fills.json');
+    this.file = path.join(opts.dir, 'smart-analysis-v3.json');
+    this.fillsFile = path.join(opts.dir, 'smart-fills-v3.json');
     this.db = this._load(this.file);
     this.fills = this._load(this.fillsFile);
     this.win = null;
