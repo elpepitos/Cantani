@@ -1,0 +1,39 @@
+{
+  "name": "lyrics-overlay",
+  "version": "1.0.0",
+  "description": "Letras sincronizadas flotando sobre tu pantalla en Windows (Spotify y YouTube), con modo karaoke.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/lyrics.test.js",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "local.lyrics.overlay",
+    "productName": "Lyrics Overlay",
+    "asarUnpack": [
+      "src/media/**"
+    ],
+    "files": [
+      "src/**",
+      "assets/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable"
+    }
+  },
+  "license": "MIT",
+  "keywords": [
+    "lyrics",
+    "windows",
+    "electron",
+    "spotify",
+    "karaoke",
+    "overlay"
+  ]
+}

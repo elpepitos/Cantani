@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Lyrics Overlay — Ajustes</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Lyrics Overlay</h1>
+      <p class="sub">Letras sincronizadas sobre tu pantalla. Los cambios se ven al instante.</p>
+    </div>
+    <label class="switch big"><input type="checkbox" id="enabled"><span></span><b>Activado</b></label>
+  </header>
+
+  <section class="card now">
+    <div class="eq" id="eq"><i></i><i></i><i></i><i></i></div>
+    <div class="nowtext">
+      <div id="nowTitle">Esperando música…</div>
+      <div id="nowSub" class="muted">Pon algo en Spotify o YouTube</div>
+    </div>
+    <button id="demoBtn" class="btn">Probar con letra de ejemplo</button>
+  </section>
+
+  <section class="card" id="syncCard">
+    <div class="synchead">
+      <div>
+        <div class="synctitle">Sincronía de esta canción</div>
+        <div class="muted" id="syncHint">Se recuerda para esta canción. Teclado: <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> ajusta, <kbd>↑</kbd> lo calcula solo si la pulsas justo cuando <b>empieza</b> a cantarse una línea, <kbd>↓</kbd> restablece. Con <kbd>Shift</kbd> los saltos son de 2 s. <b>Menos</b> = la letra sale más tarde (si va adelantada, resta).</div>
+      </div>
+      <div class="syncbtns">
+        <button class="btn ghost" data-d="-5000">−5 s</button>
+        <button class="btn ghost" data-d="-1000">−1 s</button>
+        <button class="btn ghost" data-d="-250">−250</button>
+        <button class="btn ghost" data-d="-50">−50</button>
+        <span id="syncVal">0 ms</span>
+        <button class="btn ghost" data-d="50">+50</button>
+        <button class="btn ghost" data-d="250">+250</button>
+        <button class="btn ghost" data-d="1000">+1 s</button>
+        <button class="btn ghost" data-d="5000">+5 s</button>
+        <button class="btn ghost" id="syncReset">Restablecer</button>
+      </div>
+    </div>
+  </section>
+
+  <main id="grid"></main>
+
+  <details class="card" id="diagCard">
+    <summary>Diagnóstico (para cuando algo no cuadra)</summary>
+    <pre id="diag">Esperando datos…</pre>
+    <button class="btn ghost" id="copyReport" style="margin-top:10px">Copiar informe (para mandarlo a quien te ayuda)</button>
+  </details>
+
+  <footer>
+    <span class="muted">Atajo: <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd> muestra/oculta las letras · la app vive en la bandeja del sistema</span>
+    <button id="resetBtn" class="btn ghost">Restaurar valores</button>
+  </footer>
+  <script src="settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none; cursor: none; }
+body { font-family: var(--font, 'Segoe UI'), 'Segoe UI', system-ui, sans-serif; }
+
+#stage {
+  position: absolute;
+  overflow: hidden;
+  transition: opacity .6s ease;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
+}
+#stage.hidden { opacity: 0; }
+
+#lines {
+  position: absolute; left: 14px; right: 14px; top: 0;
+  will-change: transform;
+  transition: transform var(--speed, 650ms) cubic-bezier(.22, 1, .36, 1);
+}
+
+.line {
+  padding: calc(var(--fs) * .2) 0;
+  font-size: var(--fs);
+  font-weight: var(--fw);
+  line-height: 1.2;
+  text-align: var(--ta);
+  transform-origin: var(--origin);
+  color: var(--dim);
+  opacity: var(--o, 0);
+  transform: scale(var(--s, .9));
+  filter: blur(var(--b, 0px));
+  transition:
+    opacity var(--speed, 650ms) ease,
+    transform var(--speed, 650ms) cubic-bezier(.22, 1, .36, 1),
+    filter var(--speed, 650ms) ease;
+  overflow-wrap: anywhere;
+}
+
+.line .t { display: inline-block; max-width: 100%; }
+
+/* Cada palabra son dos capas: .b (fondo, con sombra y brillo, estática) y .f (relleno, solo se recorta).
+   Así la sombra/brillo no se vuelven a calcular en cada fotograma del karaoke (era lo que más GPU gastaba). */
+.w { position: relative; display: inline-block; }
+.w .b {
+  text-shadow: 0 2px 8px rgba(0, 0, 0, var(--shadow, .5)), 0 0 var(--gl, 0px) var(--glowc, #fff);
+  transition: text-shadow var(--speed, 650ms) ease;
+}
+.w .f { display: none; }
+
+.line.active { --gl: var(--glow-px, 0px); color: var(--active); filter: none; }
+
+/* Relleno estilo karaoke: la parte cantada se ilumina (capa .f recortada por --wp, de 0 a 1) */
+body.karaoke .line.active .b { color: var(--unfilled); }
+body.karaoke .line.active .f {
+  display: block;
+  position: absolute; left: 0; top: 0; white-space: nowrap;
+  color: var(--active);
+  clip-path: inset(0 calc((1 - var(--wp, 0)) * 100%) 0 0);
+  will-change: clip-path;
+}
+
+/* Aviso breve al ajustar la sincronía con el teclado */
+#toast {
+  position: fixed; left: 50%; bottom: 6vh; transform: translateX(-50%) translateY(8px);
+  padding: 10px 20px; border-radius: 999px; max-width: 90%; text-align: center; box-sizing: border-box;
+  background: rgba(15, 17, 22, .82); color: #fff; font: 600 18px 'Segoe UI', system-ui, sans-serif;
+  opacity: 0; transition: opacity .25s ease, transform .25s ease; pointer-events: none;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Flotación suave de la línea activa */
+body.float .line.active .t { animation: float 3.8s ease-in-out infinite; }
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
+/* Sin animación: usado al cargar letras nuevas para que no "viajen" desde arriba */
+#lines.instant, #lines.instant .line, #lines.instant .t { transition: none !important; }
+
+/* Modo ligero: quita lo que más cuesta de dibujar (animación continua, brillos, máscara, desenfoque) */
+body.light .line.active .t { animation: none; }
+body.light .line { filter: none !important; }
+body.light #stage { -webkit-mask-image: none; mask-image: none; }
+body.light .w .b { text-shadow: 0 1px 4px rgba(0, 0, 0, var(--shadow, .5)); transition: none; }
+body.light.karaoke .line.active .f { will-change: auto; }
