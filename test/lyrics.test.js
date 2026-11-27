@@ -217,6 +217,32 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   assert.ok(findOnsets(limpia).length >= 1);
 }
 
+
+// Modo inteligente: aprender la duración real de cada línea cantada
+{
+  const { learnFills } = require('../src/smart/onset');
+  let seed = 11; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const lin = (d) => Math.pow(10, d / 20);
+  // 8 líneas cada 4 s desde 10 s; la voz de cada línea empieza 250 ms tarde y dura 2200 ms (piano suave de fondo)
+  const lines = []; for (let i = 0; i < 8; i++) lines.push({ t: 10000 + i * 4000, text: 'línea ' + i });
+  const sing = (p) => lines.some((l) => p >= l.t + 250 && p < l.t + 2450);
+  const hops = []; for (let p = 0; p <= 44000; p += 20) hops.push({ p, v: lin((sing(p) ? -24 : -50) + (rnd() - .5) * 1.5), a: 1 });
+  const r = learnFills(hops, lines, 0);
+  assert.ok(r.fills.length >= 7, 'aprende casi todas: ' + r.fills.length);
+  r.fills.forEach((f) => { assert.ok(Math.abs(f.dur - 2200) <= 120, 'dur ≈ 2200: ' + f.dur); assert.ok(Math.abs(f.lead - 250) <= 100, 'lead ≈ 250: ' + f.lead); });
+  // con ajuste de canción (las letras van 1 s por delante del audio): se compensa
+  const hops2 = hops.map((h) => ({ ...h, p: h.p - 1000 }));
+  const r2 = learnFills(hops2.filter((h) => h.p >= 0), lines, 1000);
+  assert.ok(r2.fills.length >= 6 && r2.fills.every((f) => Math.abs(f.dur - 2200) <= 120 && Math.abs(f.lead - 250) <= 100), 'con offset: ' + JSON.stringify(r2.fills.slice(0, 2)));
+  // fondo instrumental fuerte y continuo: no se distingue el final -> no aprende nada
+  const densas = []; for (let p = 0; p <= 44000; p += 20) densas.push({ p, v: lin(-24 + (rnd() - .5) * 1.5), a: 1 });
+  assert.strictEqual(learnFills(densas, lines, 0).fills.length, 0);
+  // sin audio de la mitad de la canción: solo aprende lo que cubrió
+  const mitad = hops.filter((h) => h.p < 24000);
+  const r3 = learnFills(mitad, lines, 0);
+  assert.ok(r3.fills.length >= 3 && r3.fills.length <= 4, 'cobertura parcial: ' + r3.fills.length);
+}
+
 // OffsetStore.learned
 {
   const os = require('../src/offsets');

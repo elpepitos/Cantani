@@ -62,12 +62,13 @@
     const models = lines.map((l) => (l.words ? null : T.lineModel(l.text || '♪')));
     const pace = T.songPace(lines, models);
     const paces = T.localPaces(lines, models, pace);
+    const learned = new Map(((track && track.fills) || []).map((f) => [f.t, f]));   // relleno aprendido por el modo inteligente
     els = lines.map((l, j) => {
       const div = document.createElement('div');
       div.className = 'line';
       const span = document.createElement('span');
       span.className = 't';
-      const info = { list: [], total: 0, real: false, fillMs: 0, realWords: null };
+      const info = { list: [], total: 0, real: false, fillMs: 0, realWords: null, learned: learned.get(l.t) || null };
       const addWord = (txt, extra) => {
         const ws = document.createElement('span');
         ws.className = 'w';
@@ -161,6 +162,13 @@
       return;
     }
     const lead = S ? (S.fillLeadMs || 0) : 0, scale = S ? (S.fillScalePct || 100) / 100 : 1;
+    if (info.learned) {
+      // Tiempos medidos del audio: empieza cuando entra la voz y dura lo que de verdad se canta
+      const L = info.learned;
+      const doneL = clamp((pos + lead - (lines[j].t + L.lead)) / L.dur, 0, 1) * info.total;
+      for (const w of info.list) setWp(w, T.wordProgress(w, doneL));
+      return;
+    }
     const done = clamp((pos + lead - lines[j].t) / (info.fillMs * scale), 0, 1) * info.total;
     for (const w of info.list) setWp(w, T.wordProgress(w, done));
   }

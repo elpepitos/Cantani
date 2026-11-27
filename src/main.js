@@ -202,10 +202,7 @@ async function loadLyricsFor(sample, key) {
   state.track.lyricsSourceName = result ? (result.source || 'LRCLIB') : '';
   state.track.lyricsState = result ? 'found' : 'none';
   emitTrack();
-  if (smartMgr && result) {
-    const first = timing.cleanIntro(result.lines).find((l) => l.text);
-    smartMgr.onLyrics(key, first ? first.t : null);
-  }
+  if (smartMgr && result) smartMgr.onLyrics(state.songKey, timing.cleanIntro(result.lines));
 }
 
 function onSample(s) {
@@ -240,8 +237,9 @@ function onSample(s) {
     state.track = { active: !!key, title: s.title || '', artist: s.artist || '', album: s.album || '', app: s.app || '', lyricsState: key ? 'loading' : 'idle', lyrics: null, approx: false, lyricsDuration: 0 };
     state.songKey = key ? OffsetStore.keyFor(s.artist, s.title) : '';
     state.songOffsetMs = state.songKey ? offsets.get(state.songKey) : 0;
+    if (smartMgr) smartMgr.onTrackStart(state.songKey);
+    state.track.fills = smartMgr ? smartMgr.fillsFor(state.songKey) : null;
     emitTrack();
-    if (smartMgr) smartMgr.onTrackStart(state.songKey, { posMs: 0 });
     if (key) loadLyricsFor(s, key);
   } else {
     state.pendingKey = null; state.pendingCount = 0;
@@ -385,6 +383,7 @@ app.whenReady().then(() => {
     dir: app.getPath('userData'),
     log: (m) => { state.logs.push(new Date().toISOString().slice(11, 19) + ' ' + String(m)); if (state.logs.length > 40) state.logs.shift(); },
     hasManual: (k) => offsets.has(k),
+    getOffset: (k) => offsets.get(k),
     enabled: () => !!store.get().smartMode,
     apply: (k, ms) => {
       if (state.songKey !== k) return;
