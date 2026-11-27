@@ -183,6 +183,40 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   assert.strictEqual(parseTimedLyrics(buenas).length, 4);
 }
 
+
+// Modo inteligente: detección de la entrada de la voz (señales sintéticas)
+{
+  const { analyze, findOnsets } = require('../src/smart/onset');
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const lin = (d) => Math.pow(10, d / 20);
+  const make = (fn, endMs = 20000, startMs = 0) => { const h = []; for (let p = startMs; p <= endMs; p += 20) { const d = fn(p); h.push({ p, v: lin(d + (rnd() - 0.5) * 1.5), a: lin(d + 3) }); } return h; };
+  // fondo suave -48 dB y la voz entra a los 10,0 s (+22 dB)
+  const limpia = make((p) => (p < 10000 ? -48 : -26));
+  const r1 = analyze(limpia, 11300);
+  assert.ok(r1.apply, 'debe corregir: ' + JSON.stringify(r1));
+  assert.ok(Math.abs(r1.offsetMs - 1300) <= 120, 'offset ≈ +1300: ' + r1.offsetMs);
+  assert.ok(r1.confidence >= 0.7);
+  // letra adelantada respecto a la voz: offset negativo
+  const r2 = analyze(limpia, 8800);
+  assert.ok(r2.apply && Math.abs(r2.offsetMs + 1200) <= 120, 'offset ≈ -1200: ' + JSON.stringify(r2));
+  // ya va bien (diferencia < 150 ms): no toca nada
+  const r3 = analyze(limpia, 10060);
+  assert.ok(!r3.apply, 'no debe corregir si ya va bien');
+  // base instrumental con muchas subidas y bajadas sostenidas: no se fía
+  const ocupada = make((p) => (Math.floor(p / 900) % 2 === 0 ? -45 : -30) + (p > 10000 ? 4 : 0));
+  const r4 = analyze(ocupada, 11500);
+  assert.ok(!r4.apply, 'no debe corregir con fondo ocupado: ' + JSON.stringify(r4));
+  // sin voz (todo plano)
+  const plana = make(() => -40);
+  assert.ok(!analyze(plana, 10000).apply);
+  // la captura empezó demasiado tarde (sin silencio previo)
+  const tarde = make((p) => (p < 10000 ? -48 : -26), 20000, 9000);
+  assert.ok(!analyze(tarde, 10500).apply);
+  // sin primera línea
+  assert.ok(!analyze(limpia, undefined).apply);
+  assert.ok(findOnsets(limpia).length >= 1);
+}
+
 // OffsetStore.learned
 {
   const os = require('../src/offsets');

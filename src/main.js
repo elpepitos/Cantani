@@ -1,10 +1,12 @@
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, nativeImage, clipboard } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, nativeImage, clipboard, session, desktopCapturer } = require('electron');
 const path = require('path');
 const { Store } = require('./settings');
 const { MediaWatcher } = require('./media');
 const { fetchLyrics } = require('./lyrics');
 const { OffsetStore } = require('./offsets');
 const { PositionTracker } = require('./position');
+const { SmartManager } = require('./smart/manager');
+const timing = require('./overlay/timing');
 
 const HOTKEY = 'Control+Alt+L';
 const OFFSET_STEP = 250;      // ms por pulsación de Ctrl+Alt+←/→
@@ -20,7 +22,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
-let store, offsets, watcher, overlay, settingsWin, tray;
+let store, offsets, watcher, overlay, settingsWin, tray, smartMgr;
 let quitting = false;
 
 // Estado real (música detectada) y estado demo
@@ -200,6 +202,10 @@ async function loadLyricsFor(sample, key) {
   state.track.lyricsSourceName = result ? (result.source || 'LRCLIB') : '';
   state.track.lyricsState = result ? 'found' : 'none';
   emitTrack();
+  if (smartMgr && result) {
+    const first = timing.cleanIntro(result.lines).find((l) => l.text);
+    smartMgr.onLyrics(key, first ? first.t : null);
+  }
 }
 
 function onSample(s) {
@@ -235,6 +241,7 @@ function onSample(s) {
     state.songKey = key ? OffsetStore.keyFor(s.artist, s.title) : '';
     state.songOffsetMs = state.songKey ? offsets.get(state.songKey) : 0;
     emitTrack();
+    if (smartMgr) smartMgr.onTrackStart(state.songKey, { posMs: 0 });
     if (key) loadLyricsFor(s, key);
   } else {
     state.pendingKey = null; state.pendingCount = 0;
@@ -256,6 +263,7 @@ function onSample(s) {
   state.lastTick = now;
   state.lastSample = { app: s.app, playing: !!s.playing, rawPositionMs: s.positionMs, updatedAgeMs: s.updatedMs > 1e12 ? now - s.updatedMs : null, durationMs: s.durationMs, hasTimeline: !!s.hasTimeline, mode: s.hasTimeline ? state.tracker.mode : 'sin línea de tiempo' };
   state.timing = { playing: !!(s.active && s.playing), positionMs: pos, sampledAt: now };
+  if (smartMgr) smartMgr.onPosition(now, pos, !!(s.active && s.playing));
   emitTiming();
 }
 
@@ -290,6 +298,7 @@ function buildReport() {
     `Última lectura: app="${sm.app || ''}" · reproduciendo=${sm.playing} · posición=${sm.rawPositionMs} · duración=${sm.durationMs} · línea de tiempo=${sm.hasTimeline} · modo=${sm.mode}`,
     `Pista: "${t.artist || ''}" - "${t.title || ''}" · letra: ${t.lyricsState} · fuente: ${t.lyricsSourceName || ''} · respaldo=${!!t.backup} · otra versión=${!!t.approx}`,
     `Ajustes: fuente de letras=${st.lyricsSource} · global=${st.syncOffsetMs} ms · monitor=${st.display}`,
+    `Modo inteligente: ${smartMgr ? smartMgr.describe() : '?'}`,
     `Sesiones de medios que Windows ve AHORA: ${state.sessionsNow.length ? state.sessionsNow.join(' | ') : '(ninguna)'}`,
     `Reproductores vistos desde que abrió la app: ${[...state.sessionsSeen].join(' | ') || '(ninguno)'}`,
     'Registro del lector:',
@@ -308,6 +317,7 @@ function sendDiag() {
     rawPositionMs: sm.rawPositionMs, updatedAgeMs: sm.updatedAgeMs, durationMs: sm.durationMs,
     estimatedPositionMs: Math.round(posNow), songOffsetMs: state.songOffsetMs, globalOffsetMs: store.get().syncOffsetMs,
     lyricsState: t.lyricsState, lyricsSource: t.lyricsSourceName || '', approx: !!t.approx, lyricsDurationSec: t.lyricsDuration || 0,
+    smart: smartMgr ? smartMgr.describe() : '',
     lineCount: lines.length, firstLineMs: lines.length ? lines[0].t : null,
     pos: state.tracker.stats, maxGapMs: state.gapMax || 0, restarts: watcher ? watcher.restarts : 0,
     firstTextLineMs: (lines.find((l) => l.text) || {}).t ?? null
@@ -371,6 +381,18 @@ app.on('second-instance', openSettings);
 app.whenReady().then(() => {
   store = new Store(path.join(app.getPath('userData'), 'settings.json'));
   offsets = new OffsetStore(path.join(app.getPath('userData'), 'song-offsets.json'));
+  smartMgr = new SmartManager({ BrowserWindow, session, desktopCapturer, ipcMain }, {
+    dir: app.getPath('userData'),
+    log: (m) => { state.logs.push(new Date().toISOString().slice(11, 19) + ' ' + String(m)); if (state.logs.length > 40) state.logs.shift(); },
+    hasManual: (k) => offsets.has(k),
+    enabled: () => !!store.get().smartMode,
+    apply: (k, ms) => {
+      if (state.songKey !== k) return;
+      state.songOffsetMs = ms; offsets.set(k, ms);
+      broadcast('offset', { songOffsetMs: ms, toast: false });
+      broadcast('toast', { text: `Modo inteligente: letras ajustadas ${ms > 0 ? '+' : ''}${ms} ms para esta canción`, ms: 4500 });
+    }
+  });
   registerIpc();
   createOverlay();
   createTray();
@@ -384,6 +406,12 @@ app.whenReady().then(() => {
   hotkey('Control+Alt+Left', () => adjustOffset(-OFFSET_STEP));   // letras más tarde
   hotkey('Control+Alt+Down', () => adjustOffset(0, true));        // quitar el ajuste de esta canción
   hotkey('Control+Alt+PageUp', () => send(overlay, 'calibrateFirst')); // "la 1.ª línea cantada suena AHORA": arregla letras desfasadas muchos segundos
+  hotkey('Control+Alt+I', () => {          // interruptor secreto del modo inteligente (experimental)
+    const on = !store.get().smartMode;
+    store.set({ smartMode: on });
+    if (!on) smartMgr.stop();
+    broadcast('toast', { text: on ? 'Modo inteligente ACTIVADO (se aplica desde la próxima canción)' : 'Modo inteligente desactivado', ms: 3500 });
+  });
   hotkey('Control+Alt+Up', () => send(overlay, 'calibrate'));     // "esta línea empieza AHORA": ajuste exacto
 
   setInterval(sendDiag, 1000);
@@ -398,6 +426,6 @@ app.whenReady().then(() => {
   screen.on('display-removed', moveOverlayToDisplay);
 });
 
-app.on('before-quit', () => { quitting = true; store && store.flush(); offsets && offsets.flush(); watcher && watcher.stop(); });
+app.on('before-quit', () => { quitting = true; smartMgr && smartMgr.stop(); store && store.flush(); offsets && offsets.flush(); watcher && watcher.stop(); });
 app.on('will-quit', () => globalShortcut.unregisterAll());
 app.on('window-all-closed', (e) => e.preventDefault()); // vive en la bandeja

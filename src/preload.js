@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   onTrack: (cb) => on('track', cb),
   onTiming: (cb) => on('timing', cb),
   onOffset: (cb) => on('offset', cb),
+  onToast: (cb) => on('toast', cb),
   onCalibrate: (cb) => on('calibrate', cb),
   onCalibrateFirst: (cb) => on('calibrateFirst', cb),
   copyReport: () => ipcRenderer.invoke('report:copy'),

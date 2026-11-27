@@ -169,6 +169,7 @@
       `Ajustes:            global ${d.globalOffsetMs} ms · canción ${d.songOffsetMs} ms`,
       `Fuente de la letra: ${d.lyricsSource || '—'}`,
       `Letra:              ${d.lyricsState}${d.approx ? ' (otra versión)' : ''} · ${d.lineCount} líneas · dura ${d.lyricsDurationSec ? d.lyricsDurationSec + ' s' : '—'} (${verdict})`,
+      `Modo inteligente:   ${d.smart || '—'}  (interruptor: Ctrl+Alt+I)`,
       `Estabilidad:        correcciones ${d.pos ? d.pos.corrections : 0} · mayor ${d.pos ? d.pos.maxAbsMs : 0} ms · saltos >0,5 s: ${d.pos ? d.pos.bigJumps : 0} · mayor hueco entre lecturas ${d.maxGapMs || 0} ms · reinicios PS ${d.restarts || 0}`,
       `Primera palabra:    ${fmt(d.firstTextLineMs)}`
     ].join('\n');

@@ -271,6 +271,7 @@
     window.api.setOffset(window.LyricsTiming.calibratedOffset(lines[0].t, base, 180, 60000));
   });
 
+  window.api.onToast((d) => toast(String(d.text || ''), d.ms || 3000));
   window.api.onOffset((d) => {
     songOffset = d.songOffsetMs || 0;
     if (d.toast) toast(`Sincronía de esta canción: ${songOffset > 0 ? '+' : ''}${songOffset} ms`);
