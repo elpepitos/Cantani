@@ -11,6 +11,7 @@ class PositionTracker {
   constructor() { this.reset(); }
 
   reset() {
+    this.prevTrackP = (this.lastP === undefined) ? null : this.lastP;   // última posición de la canción anterior
     this.anchor = null;      // { P, at } posición P válida en el instante `at`
     this.lastP = null;
     this.lastU = null;
@@ -55,7 +56,10 @@ class PositionTracker {
       const since = ctx.sinceChangeMs || 0;
       const cand = s.playing ? P + Math.max(0, now - at) : P;
       const early = ctx.hadPrevious && since < 25000;
-      const tooFar = early && cand > since + 5000;
+      // Un salto real (el usuario adelanta) llega con marca fresca y lejos de la posición vieja; un dato viejo, no.
+      const freshSeek = !!U && changedU && now - U < 2500 && this.mode !== 'viva' &&
+        (this.prevTrackP == null || Math.abs(P - this.prevTrackP) > 3000);
+      const tooFar = early && cand > since + 5000 && !freshSeek;
       const pastEnd = this.mode === 'inicial' && s.durationMs > 0 && cand > s.durationMs + 15000;
       if (tooFar || pastEnd) {
         const keep = prev && this.mode !== 'inicial' && (prev.P + Math.max(0, now - prev.at)) <= since + 5000;
