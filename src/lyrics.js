@@ -119,7 +119,7 @@ async function fetchLyrics(track, cacheDir, mode = 'ytm-first') {
   const strict = isStrictSource(track.app);
   const tol = strict ? 6 : 25; // en YouTube la duración incluye intros/outros del video
   const key = crypto.createHash('sha1')
-    .update(`v4|${mode}|${track.artist}|${track.title}|${Math.round(durationSec / 5)}`.toLowerCase()).digest('hex');
+    .update(`v5|${mode}|${track.artist}|${track.title}|${Math.round(durationSec / 5)}`.toLowerCase()).digest('hex');
   const cacheFile = cacheDir ? path.join(cacheDir, key + '.json') : null;
   try {
     if (cacheFile && fs.existsSync(cacheFile)) {

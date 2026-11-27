@@ -78,11 +78,16 @@ function parseTimedLyrics(json) {
   let data = null;
   walk(json, (k, v) => { if (k === 'timedLyricsData' && Array.isArray(v) && !data) data = v; });
   if (!data) return [];
+  // Hay canciones cuyas letras vienen SIN tiempos (solo el texto): no sirven para sincronizar.
+  const withTime = data.filter((d) => d && d.cueRange && Number.isFinite(Number(d.cueRange.startTimeMilliseconds))).length;
+  if (data.length === 0 || withTime < data.length * 0.8) return [];
   const lines = data.map((d) => ({
     t: Number(((d.cueRange || {}).startTimeMilliseconds)) || 0,
     text: String(d.lyricLine || '').replace(/\s+/g, ' ').trim()
   })).filter((l) => Number.isFinite(l.t));
   lines.sort((a, b) => a.t - b.t);
+  // Tiempos inservibles (todos casi iguales): tampoco valen
+  if (lines.length > 3 && lines[lines.length - 1].t - lines[0].t < 1000) return [];
   return lines.some((l) => l.text) ? lines : [];
 }
 

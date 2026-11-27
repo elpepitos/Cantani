@@ -171,6 +171,18 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   assert.strictEqual(p5, 5000);
 }
 
+
+// YouTube Music: letras SIN tiempos (solo texto) no deben usarse (bug "Say So": todas a t=0 -> última línea)
+{
+  const { parseTimedLyrics } = require('../src/ytmusic');
+  const sinTiempos = { x: { timedLyricsData: [{ lyricLine: 'a' }, { lyricLine: 'b' }, { lyricLine: 'c' }, { lyricLine: 'd' }] } };
+  assert.deepStrictEqual(parseTimedLyrics(sinTiempos), []);
+  const todasCero = { x: { timedLyricsData: [0, 0, 0, 0].map((n, i) => ({ lyricLine: 'l' + i, cueRange: { startTimeMilliseconds: String(n) } })) } };
+  assert.deepStrictEqual(parseTimedLyrics(todasCero), []);
+  const buenas = { x: { timedLyricsData: [1000, 5000, 9000, 12000].map((n, i) => ({ lyricLine: 'l' + i, cueRange: { startTimeMilliseconds: String(n) } })) } };
+  assert.strictEqual(parseTimedLyrics(buenas).length, 4);
+}
+
 // OffsetStore.learned
 {
   const os = require('../src/offsets');
