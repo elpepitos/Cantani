@@ -2,8 +2,9 @@
 (async () => {
   const api = window.smartApi;
   try {
+    // Chromium exige pedir vídeo, pero el programa principal solo concede audio (loopback): sin vídeo no hay coste de captura de pantalla
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    stream.getVideoTracks().forEach((t) => t.stop());          // el vídeo no se usa: se corta enseguida
+    stream.getVideoTracks().forEach((t) => { t.stop(); stream.removeTrack(t); });
     const audio = stream.getAudioTracks();
     if (!audio.length) throw new Error('Windows no dio audio del sistema');
     const ctx = new AudioContext({ sampleRate: 16000, latencyHint: 'playback' });

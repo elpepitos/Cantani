@@ -163,9 +163,13 @@
     }
     const lead = S ? (S.fillLeadMs || 0) : 0, scale = S ? (S.fillScalePct || 100) / 100 : 1;
     if (info.learned) {
-      // Tiempos medidos del audio: empieza cuando entra la voz y dura lo que de verdad se canta
+      // Tiempos medidos del audio: empieza cuando entra la voz y dura lo que de verdad se canta.
+      // Se limitan contra la estimación de siempre: una medida rara no puede dejar la línea mucho peor.
       const L = info.learned;
-      const doneL = clamp((pos + lead - (lines[j].t + L.lead)) / L.dur, 0, 1) * info.total;
+      const lo = info.fillMs * 0.5, hi = info.fillMs * 1.8;
+      const dur = Math.min(hi, Math.max(lo, L.dur));
+      const lead2 = Math.max(-600, Math.min(900, L.lead));
+      const doneL = clamp((pos + lead - (lines[j].t + lead2)) / dur, 0, 1) * info.total;
       for (const w of info.list) setWp(w, T.wordProgress(w, doneL));
       return;
     }

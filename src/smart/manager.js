@@ -13,6 +13,9 @@ const ALIGN_STAGE_MS = 170000;           // tiempo máximo para alinear toda la 
 const MAX_CAPTURE_MS = 12 * 60 * 1000;   // tope de seguridad por canción
 const RETRY_AFTER_MS = 7 * 24 * 3600 * 1000;
 const GOOD_COVERAGE = 0.7;               // si ya hay tanto aprendido, no se vuelve a escuchar
+const MIN_FILL_COVERAGE = 0.5;           // por debajo de esto el relleno medido no es fiable: se usa el de siempre
+const MIN_FILL_LINES = 8;
+const VERIFY_TOL_MS = 400;               // cuánto puede variar una medición posterior sin considerarse contradicción
 
 class SmartManager {
   /**
@@ -32,7 +35,13 @@ class SmartManager {
     const ipc = electron.ipcMain;
     ipc.on('smart:hops', (ev, d) => this._onHops(ev, d));
     ipc.on('smart:ready', (ev) => { if (this._mine(ev)) this.status = 'escuchando'; });
-    ipc.on('smart:error', (ev, m) => { if (this._mine(ev)) { this.o.log('modo inteligente: ' + m); this.status = 'error: ' + m; this._close(); this.s = null; } });
+    ipc.on('smart:error', (ev, m) => {
+      if (!this._mine(ev)) return;
+      this.o.log('modo inteligente: ' + m);
+      // Algunas versiones de Windows no dan el audio sin conceder también la pantalla: se reintenta una vez así
+      if (!this.withVideo) { this.withVideo = true; this.handlerSet = false; this._close(); this._openWindow(); return; }
+      this.status = 'error: ' + m; this._close(); this.s = null;
+    });
   }
 
   _load(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')) || {}; } catch { return {}; } }
@@ -50,7 +59,8 @@ class SmartManager {
   fillsFor(key) {
     if (!this.o.enabled() || !key) return null;
     const f = this.fills[key];
-    return f && f.fills && f.fills.length ? f.fills : null;
+    if (!f || !f.fills || f.fills.length < MIN_FILL_LINES || f.coverage < MIN_FILL_COVERAGE) return null;
+    return f.fills;
   }
 
   /** Canción nueva: cierra (y aprende de) la anterior y decide si merece la pena escuchar esta. */
@@ -61,12 +71,12 @@ class SmartManager {
     const prev = this.db[key];
     const needOffset = !this.o.hasManual(key) && !(prev && Date.now() - prev.at < RETRY_AFTER_MS);
     const f = this.fills[key];
-    const needFills = !(f && f.coverage >= GOOD_COVERAGE);
+    const needFills = !(f && f.coverage >= GOOD_COVERAGE && f.fills.length >= MIN_FILL_LINES);
     if (prev) this.offsetNote = prev.applied ? `${prev.offsetMs} ms (ya analizada)` : `sin cambios (${prev.reason})`;
     else if (this.o.hasManual(key)) this.offsetNote = 'omitido (ajuste a mano)';
     if (f) this.learnNote = `${f.fills.length} líneas aprendidas (${Math.round(f.coverage * 100)} %)`;
     if (!needOffset && !needFills) { this.status = 'canción ya aprendida'; return; }
-    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needAlign: needOffset, alignedAt: 0, alignHist: [], needFills, done: false };
+    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needAlign: needOffset, alignedAt: 0, alignHist: [], applied: null, confirms: 0, doubts: 0, needFills, done: false };
     this.status = 'arrancando captura';
     this._openWindow();
   }
@@ -111,12 +121,14 @@ class SmartManager {
   }
 
   _openWindow() {
-    const { BrowserWindow, session, desktopCapturer } = this.e;
+    const { BrowserWindow, session } = this.e;
+    if (!this.s) return;
     if (!this.handlerSet) {
       this.handlerSet = true;
       session.defaultSession.setDisplayMediaRequestHandler(async (_req, cb) => {
         try {
-          const src = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
+          if (!this.withVideo) { cb({ audio: 'loopback' }); return; }   // solo audio: no se captura la pantalla
+          const src = await this.e.desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
           cb({ video: src[0], audio: 'loopback' });
         } catch { cb({}); }
       });
@@ -203,11 +215,42 @@ class SmartManager {
       const hops = this._toHops(s);
       const res = alignByCorrelation(hops, s.lines);
       this.o.log(`modo inteligente (alineación): ${JSON.stringify(res)}`);
+      if (s.applied) { this._verify(s, res); return; }
       if (Number.isFinite(res.offsetMs) && Number.isFinite(res.z)) s.alignHist.push({ offsetMs: res.offsetMs, z: res.z, ratio: res.ratio });
       const rep = res.apply ? res : stableAlignment(s.alignHist);          // una pasada clara, o varias pasadas que coinciden
-      if (rep && rep.apply && live) { this.o.apply(s.key, rep.offsetMs, rep); this._decide(s, { applied: true, offsetMs: rep.offsetMs, confidence: rep.confidence }, `aplicado ${rep.offsetMs} ms por alineación${rep.stable ? ' repetida' : ''} (confianza ${rep.confidence})`); return; }
+      if (rep && rep.apply && live) {
+        // Se aplica EN PRUEBAS: las siguientes mediciones, con más audio, tienen que confirmarlo o se deshace.
+        s.applied = { ms: rep.offsetMs, confidence: rep.confidence, stable: !!rep.stable };
+        this.o.apply(s.key, rep.offsetMs, rep);
+        this.offsetNote = `probando ${rep.offsetMs} ms (confianza ${rep.confidence})`;
+        this.status = 'comprobando el ajuste';
+        return;
+      }
       if (res.reason === 'ya va bien') { this._decide(s, { applied: false, reason: 'ya va bien' }, 'sin cambios (ya iba bien)'); return; }
       this.offsetNote = `buscando… (${res.reason || 'sin datos'})`;
+    }
+  }
+
+  /**
+   * Comprueba un ajuste ya aplicado con audio nuevo. Dos mediciones que lo contradigan lo deshacen:
+   * así una coincidencia casual no deja una canción peor de como estaba.
+   */
+  _verify(s, res) {
+    const ap = s.applied;
+    if (this.o.getOffset(s.key) !== ap.ms) { s.needAlign = false; this.offsetNote = `aplicado ${ap.ms} ms (lo cambiaste tú)`; return; }  // el usuario lo tocó: no se insiste
+    if (!Number.isFinite(res.offsetMs) || !Number.isFinite(res.z)) return;
+    if (Math.abs(res.offsetMs - ap.ms) <= VERIFY_TOL_MS) {
+      s.confirms++; s.doubts = 0;
+      this.offsetNote = `aplicado ${ap.ms} ms (confirmado ${s.confirms}/2)`;
+      if (s.confirms >= 2) this._decide(s, { applied: true, offsetMs: ap.ms, confidence: ap.confidence }, `aplicado ${ap.ms} ms (comprobado)`);
+      return;
+    }
+    s.doubts++;
+    this.offsetNote = `comprobando… (la nueva medida dice ${res.offsetMs} ms)`;
+    if (s.doubts >= 2) {
+      this.o.apply(s.key, 0, { revert: true });
+      s.applied = null;
+      this._decide(s, { applied: false, reason: 'medidas contradictorias' }, 'deshecho (las medidas no coincidían)');
     }
   }
 
@@ -223,7 +266,7 @@ class SmartManager {
           const r = learnFills(hops, s.lines, this.o.getOffset(s.key));
           const old = this.fills[s.key];
           this.o.log(`modo inteligente (relleno): ${r.fills.length}/${r.singable} líneas`);
-          if (r.fills.length >= 3 && (!old || r.coverage > old.coverage)) {
+          if (r.fills.length >= MIN_FILL_LINES && r.coverage >= MIN_FILL_COVERAGE && (!old || r.coverage > old.coverage)) {
             this.fills[s.key] = { at: Date.now(), coverage: +r.coverage.toFixed(2), fills: r.fills };
             this._save(this.fillsFile, this.fills);
             this.learnNote = `${r.fills.length} líneas aprendidas (${Math.round(r.coverage * 100)} %)`;

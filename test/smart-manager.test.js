@@ -61,3 +61,33 @@ console.log('smart-manager OK', applied, f.length, 'líneas');
   assert.ok(Math.abs(ap[1] - SHIFT) <= 120, 'offset ≈ 4200: ' + ap[1]);
   console.log('alineación completa OK', ap[1]);
 }
+
+// Canción rápida: una coincidencia dudosa se aplica a prueba, pero las medidas siguientes la contradicen -> se deshace
+{
+  const ipc = new EventEmitter();
+  const w = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
+  class BW3 { constructor() { w.dead = false; return w; } }
+  const hist = []; const lg = [];
+  let cur = 0;
+  const m = new SmartManager({ BrowserWindow: BW3, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
+    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'sm3-')), log: (x) => lg.push(x), hasManual: () => false, getOffset: () => cur, enabled: () => true, apply: (k, ms) => { cur = ms; hist.push(ms); } });
+  m.onTrackStart('lumi|smoke');
+  m.onLyrics('lumi|smoke', [{ t: 0, text: 'a' }]);
+  const s = m.s;
+  s.applied = { ms: -2000, confidence: 0.5, stable: true };   // ajuste puesto a prueba
+  cur = -2000;
+  m._verify(s, { offsetMs: 150, z: 6, ratio: 1.5 });          // la medida nueva dice que no hacía falta
+  assert.strictEqual(s.doubts, 1);
+  assert.strictEqual(cur, -2000, 'una sola duda no deshace');
+  m._verify(s, { offsetMs: 120, z: 6, ratio: 1.5 });
+  assert.strictEqual(cur, 0, 'dos dudas deshacen el ajuste');
+  assert.ok(m.describe().includes('deshecho'), m.describe());
+  // y confirmado: dos medidas que coinciden lo dejan fijo
+  const s2 = { key: 'k2', applied: { ms: -2340, confidence: 0.6 }, confirms: 0, doubts: 0, needAlign: true, needFills: false, alignHist: [] };
+  m.s = s2; cur = -2340;
+  m._verify(s2, { offsetMs: -2300, z: 4, ratio: 1.3 });
+  m._verify(s2, { offsetMs: -2380, z: 4, ratio: 1.3 });
+  assert.strictEqual(cur, -2340, 'se mantiene');
+  assert.ok(m.describe().includes('comprobado'), m.describe());
+  console.log('verificación y deshacer OK');
+}

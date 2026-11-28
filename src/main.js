@@ -386,11 +386,14 @@ app.whenReady().then(() => {
     hasManual: (k) => offsets.has(k),
     getOffset: (k) => offsets.get(k),
     enabled: () => !!store.get().smartMode,
-    apply: (k, ms) => {
+    apply: (k, ms, info) => {
       if (state.songKey !== k) return;
       state.songOffsetMs = ms; offsets.set(k, ms);
       broadcast('offset', { songOffsetMs: ms, toast: false });
-      broadcast('toast', { text: `Modo inteligente: letras ajustadas ${ms > 0 ? '+' : ''}${ms} ms para esta canción`, ms: 4500 });
+      const text = (info && info.revert)
+        ? 'Modo inteligente: ajuste deshecho (las medidas no coincidían)'
+        : `Modo inteligente: letras ajustadas ${ms > 0 ? '+' : ''}${ms} ms para esta canción`;
+      broadcast('toast', { text, ms: 4500 });
     }
   });
   registerIpc();
