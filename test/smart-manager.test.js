@@ -134,13 +134,17 @@ console.log('smart-manager OK', applied, f.length, 'líneas');
   assert.ok(m.s && m.s !== first, 'sesión reiniciada');
   assert.ok(m.s.lines === L, 'conserva la letra tras reiniciar');
   // resultado no concluyente: se vuelve a intentar enseguida
-  m.db['t|x'] = { at: Date.now(), applied: false, soft: true, fails: 1, reason: 'no se pudo alinear' };
+  m.db['t|x'] = { at: Date.now(), applied: false, fails: 1, reason: 'no se pudo alinear' };
   m.onTrackStart('t|x');
   assert.ok(m.s && m.s.needAlign, 'reintenta un resultado no concluyente');
   // tras varios intentos fallidos deja de insistir
-  m.db['t|x'] = { at: Date.now(), applied: false, soft: true, fails: 3, reason: 'no se pudo alinear' };
+  m.db['t|x'] = { at: Date.now(), applied: false, fails: 3, reason: 'no se pudo alinear' };
   m.onTrackStart('t|x');
   assert.ok(!m.s || !m.s.needAlign, 'deja de insistir tras 3 intentos');
+  // un resultado antiguo sin contador (de una versión anterior) no debe bloquear para siempre
+  m.db['t|x'] = { at: Date.now(), applied: false, reason: 'no se pudo alinear' };
+  m.onTrackStart('t|x');
+  assert.ok(m.s && m.s.needAlign, 'un registro viejo no bloquea');
   // resultado firme: no se repite
   m.db['t|x'] = { at: Date.now(), applied: true, offsetMs: -2340 };
   m.onTrackStart('t|x');

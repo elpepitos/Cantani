@@ -310,6 +310,29 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   assert.ok(T.fillDuration(1700, mf[0].total, lpf[0]) >= 1700 * 0.9, 'canción rápida: el relleno ocupa el hueco');
 }
 
+
+// Alineación en música densa (tipo orquesta): la energía sube por todas partes, pero la proporción
+// de banda de voz solo sube cuando alguien canta. Antes esto confundía al detector.
+{
+  const { alignByCorrelation } = require('../src/smart/onset');
+  let seed = 33; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const lin = (d) => Math.pow(10, d / 20);
+  const lines = []; let t = 0;
+  for (let i = 0; i < 26; i++) { lines.push({ t, text: 'x' + i }); t += i === 12 ? 15000 : 2400 + Math.floor(rnd() * 3600); }
+  const END = t + 4000, SHIFT = 3500;
+  const h = [];
+  for (let p = 0; p <= END; p += 20) {
+    const cantando = lines.some((l) => p >= l.t - SHIFT && p < l.t - SHIFT + 1600);
+    const golpe = Math.floor(p / 800) % 3 === 0;                       // orquesta con golpes constantes
+    const v = cantando ? -24 : (golpe ? -26 : -34);                    // energía parecida con y sin voz
+    const a = cantando ? -18 : (golpe ? -14 : -24);                    // pero el total es mayor sin voz
+    h.push({ p, v: lin(v + (rnd() - .5) * 2), a: lin(a + (rnd() - .5) * 2) });
+  }
+  const r = alignByCorrelation(h, lines);
+  assert.ok(r.apply, 'debe alinear en música densa: ' + JSON.stringify(r));
+  assert.ok(Math.abs(r.offsetMs - SHIFT) <= 150, 'offset ≈ 3500: ' + r.offsetMs);
+}
+
 // OffsetStore.learned
 {
   const os = require('../src/offsets');

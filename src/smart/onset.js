@@ -204,20 +204,56 @@ function alignByCorrelation(hops, lines, opt = {}) {
   const R = Math.round(o.tolMs / STEP);
   const dil = new Float32Array(N);
   for (let g = 0; g < N; g++) { let m = 0; for (let k = Math.max(0, g - R); k <= Math.min(N - 1, g + R); k++) if (flux[k] > m) m = flux[k]; dil[g] = m; }
+  // "Presencia de voz": cuánta de la energía total está en la banda de la voz. En música densa (orquesta)
+  // la energía sube en todas partes, pero esta proporción sube sobre todo cuando alguien canta.
+  const presG = new Float32Array(N);
+  {
+    const rRaw = new Array(hops.length);
+    for (let i = 0; i < hops.length; i++) rRaw[i] = db(hops[i].v) - db(hops[i].a);
+    const rs = smooth(rRaw, 10);
+    for (let i = 0; i < hops.length; i++) { const g = Math.round((hops[i].p - p0) / STEP); if (g >= 0 && g < N) presG[g] = rs[i]; }
+    let last = 0;
+    for (let g = 0; g < N; g++) { if (seen[g]) last = presG[g]; else presG[g] = last; }
+  }
   const isSung = (l) => l && l.text && /[\p{L}\p{N}]/u.test(l.text);
-  const ts = lines.filter(isSung).map((l) => l.t);
+  const sung = lines.filter(isSung);
+  const ts = sung.map((l) => l.t);
+  // tramo de cada línea donde debería oírse la voz (hasta 1,4 s o hasta la línea siguiente)
+  const spans = sung.map((l, i) => {
+    const nxt = sung[i + 1];
+    return Math.max(300, Math.min(1400, nxt ? (nxt.t - l.t) * 0.8 : 1400));
+  });
   if (ts.length < o.minLines) return { reason: 'pocas líneas' };
 
-  const shifts = []; const scores = [];
+  // suma acumulada de la presencia: permite la media de cualquier tramo en tiempo constante
+  const cum = new Float64Array(N + 1);
+  for (let g = 0; g < N; g++) cum[g + 1] = cum[g] + presG[g];
+
+  const shifts = []; const sOnset = []; const sPres = [];
   for (let d = -o.maxShiftMs; d <= o.maxShiftMs; d += STEP) {
-    let sum = 0, cnt = 0;
-    for (const t of ts) {
-      const g = Math.round((t - d - p0) / STEP);
-      if (g < R + 2 || g > N - R - 3) continue;
-      sum += dil[g]; cnt++;
+    let a1 = 0, a2 = 0, cnt = 0;
+    for (let i = 0; i < ts.length; i++) {
+      const g = Math.round((ts[i] - d - p0) / STEP);
+      const w = Math.round(spans[i] / STEP);
+      if (g < R + 2 || g + w > N - R - 3) continue;
+      a1 += dil[g];
+      a2 += (cum[g + w] - cum[g]) / w;
+      cnt++;
     }
-    shifts.push(d); scores.push(cnt >= o.minLines ? sum / cnt : NaN);
+    shifts.push(d);
+    sOnset.push(cnt >= o.minLines ? a1 / cnt : NaN);
+    sPres.push(cnt >= o.minLines ? a2 / cnt : NaN);
   }
+  // cada señal se normaliza por su cuenta y se suman: hace falta que coincidan las dos
+  const zify = (arr) => {
+    const v = arr.filter(Number.isFinite);
+    const mu = v.reduce((a, b) => a + b, 0) / v.length;
+    const sg = Math.sqrt(v.reduce((a, b) => a + (b - mu) * (b - mu), 0) / v.length) || 1e-6;
+    return arr.map((x) => (Number.isFinite(x) ? (x - mu) / sg : NaN));
+  };
+  if (sOnset.filter(Number.isFinite).length < 40) return { reason: 'pocas líneas dentro del audio' };
+  const zo = zify(sOnset), zp = zify(sPres);
+  const scores = zo.map((x, i) => (Number.isFinite(x) && Number.isFinite(zp[i]) ? x + zp[i] : NaN));
   const valid = scores.filter(Number.isFinite);
   if (valid.length < 40) return { reason: 'pocas líneas dentro del audio' };
   const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
@@ -228,7 +264,7 @@ function alignByCorrelation(hops, lines, opt = {}) {
   // el mejor "rival": máximo a más de 600 ms del ganador
   let second = -Infinity;
   for (let i = 0; i < scores.length; i++) if (Number.isFinite(scores[i]) && Math.abs(shifts[i] - shifts[bi]) > 600 && scores[i] > second) second = scores[i];
-  const ratio = second > 0 ? best / second : 9;
+  const ratio = Number.isFinite(second) && sd > 0 ? 1 + (best - second) / (2 * sd) : 9;   // separación con el rival, en desviaciones
   // el máximo es una meseta (la subida y la tolerancia la ensanchan): se toma el centro de la meseta
   let lo = bi, hi = bi;
   while (lo > 0 && Number.isFinite(scores[lo - 1]) && scores[lo - 1] >= best * 0.96) lo--;

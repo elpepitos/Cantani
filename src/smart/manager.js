@@ -25,8 +25,8 @@ class SmartManager {
    */
   constructor(electron, opts) {
     this.e = electron; this.o = opts;
-    this.file = path.join(opts.dir, 'smart-analysis-v3.json');
-    this.fillsFile = path.join(opts.dir, 'smart-fills-v3.json');
+    this.file = path.join(opts.dir, 'smart-analysis-v4.json');
+    this.fillsFile = path.join(opts.dir, 'smart-fills-v4.json');
     this.db = this._load(this.file);
     this.fills = this._load(this.fillsFile);
     this.win = null;
@@ -70,7 +70,9 @@ class SmartManager {
     this.offsetNote = ''; this.learnNote = '';
     if (!this.o.enabled() || !key) { this.status = this.o.enabled() ? 'sin canción' : 'inactivo'; return; }
     const prev = this.db[key];
-    const blocked = prev && (prev.soft ? (prev.fails || 1) >= SOFT_TRIES : Date.now() - prev.at < RETRY_AFTER_MS);
+    // Solo un resultado firme (ajuste puesto, o "ya iba bien") bloquea; lo demás se reintenta unas pocas veces
+    const firm = prev && (prev.applied === true || prev.reason === 'ya va bien');
+    const blocked = prev && (firm ? Date.now() - prev.at < RETRY_AFTER_MS : (prev.fails || 1) >= SOFT_TRIES);
     const needOffset = !this.o.hasManual(key) && !blocked;
     const f = this.fills[key];
     const needFills = !(f && f.coverage >= GOOD_COVERAGE && f.fills.length >= MIN_FILL_LINES);
@@ -194,14 +196,16 @@ class SmartManager {
     if (!s || !s.needAlign) return;
     s.needAlign = false; s.needOffset = false;
     const was = this.db[s.key];
-    this.db[s.key] = { at: Date.now(), applied: false, soft: true, fails: ((was && was.fails) || 0) + 1, reason: 'no se pudo alinear' };
+    this.db[s.key] = { at: Date.now(), applied: false, fails: ((was && was.fails) || 0) + 1, reason: 'no se pudo alinear' };
     this._save(this.file, this.db);
     if (!this.offsetNote) this.offsetNote = 'sin cambios (no se pudo alinear)';
   }
 
   _decide(s, rec, note) {
     s.needOffset = false; s.needAlign = false;
-    this.db[s.key] = { at: Date.now(), ...rec };
+    const was = this.db[s.key];
+    const firm = rec.applied === true || rec.reason === 'ya va bien';
+    this.db[s.key] = { at: Date.now(), ...rec, fails: firm ? 0 : ((was && was.fails) || 0) + 1 };
     this._save(this.file, this.db);
     this.offsetNote = note;
     this.status = s.needFills ? 'aprendiendo el relleno' : 'terminado';
@@ -223,7 +227,7 @@ class SmartManager {
       }
     }
     // 2) Alineación de toda la letra con las entradas de voz (cada ~10 s de audio nuevo, a partir de 45 s)
-    if (s.needAlign && s.hops.length - s.alignedAt >= 500 && s.hops.length >= 2250) {
+    if (s.needAlign && s.hops.length - s.alignedAt >= 350 && s.hops.length >= 2250) {
       s.alignedAt = s.hops.length;
       const hops = this._toHops(s);
       const res = alignByCorrelation(hops, s.lines);
