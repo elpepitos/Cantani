@@ -183,6 +183,35 @@ const smp = (P, U, playing = true, extra = {}) => ({ positionMs: P, updatedMs: U
   assert.strictEqual(parseTimedLyrics(buenas).length, 4);
 }
 
+
+
+
+
+
+
+
+
+// Relleno en canciones lentas (tiempos reales de "Little Angel - alternative version"):
+// donde hay pausa entre líneas el relleno termina con la voz en vez de arrastrarse hasta la siguiente
+{
+  const ts = [7890, 9860, 12060, 15850, 19620, 23170, 25520, 27430, 29440, 31340, 33300, 35200, 37100, 39000];
+  const slow = ts.map((t) => ({ t, text: 'tengo un angel pequeño que me cuida' }));
+  const ms = slow.map((l) => T.lineModel(l.text));
+  const lp = T.localPaces(slow, ms, T.songPace(slow, ms));
+  const largo = T.fillDuration(3790, ms[2].total, lp[2]);     // hueco largo: hay pausa después de cantar
+  const corto = T.fillDuration(1970, ms[0].total, lp[0]);     // hueco corto: se canta de corrido
+  assert.ok(largo <= 3790 * 0.75, 'el hueco largo no se estira entero: ' + largo);
+  assert.ok(largo >= 1500, 'pero el relleno no se dispara: ' + largo);
+  assert.ok(corto >= 1970 * 0.9, 'el hueco corto sí se usa entero: ' + corto);
+  // canción rápida (líneas seguidas): se sigue usando el hueco real, como antes
+  const fast = Array.from({ length: 12 }, (_, i) => ({ t: i * 1700, text: 'dale que vamos sin parar ahora' }));
+  const mf = fast.map((l) => T.lineModel(l.text));
+  const lpf = T.localPaces(fast, mf, T.songPace(fast, mf));
+  assert.ok(T.fillDuration(1700, mf[0].total, lpf[0]) >= 1700 * 0.9, 'canción rápida: el relleno ocupa el hueco');
+}
+
+
+
 // OffsetStore.learned
 {
   const os = require('../src/offsets');

@@ -38,7 +38,13 @@
     return Math.min(1, Math.max(0, (done - tok.start) / tok.len));
   }
 
-  /** Velocidad típica de la canción en ms por unidad (mediana de las líneas con letra normal). */
+  const PACE_MIN = 140, PACE_MAX = 340;   // ms por sílaba: por encima de PACE_MAX el relleno se arrastra
+  const pctl = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+
+  /**
+   * Velocidad típica de canto, en ms por unidad. Se toma un percentil bajo de los huecos entre líneas:
+   * los huecos incluyen las pausas en que no se canta, así que la mediana hace el relleno demasiado lento.
+   */
   function songPace(lines, models) {
     const ratios = [];
     for (let i = 0; i < lines.length - 1; i++) {
@@ -49,8 +55,7 @@
     }
     if (ratios.length < 3) return 260;
     ratios.sort((a, b) => a - b);
-    const med = ratios[ratios.length >> 1];
-    return Math.min(420, Math.max(140, med));
+    return Math.min(PACE_MAX, Math.max(PACE_MIN, pctl(ratios, 0.35)));
   }
 
   /**
@@ -64,23 +69,26 @@
       if (!m || m.total < 3 || l.words || !lines[i + 1]) return null;
       const gap = lines[i + 1].t - l.t;
       const r = gap / m.total;
-      return gap > 0 && gap <= 7000 && r <= globalPace * 1.5 ? r : null;
+      // se descartan los huecos desproporcionados (instrumentales), no las zonas lentas de verdad
+      return gap > 0 && gap <= 7000 && r <= globalPace * 2.5 ? r : null;
     });
     return lines.map((_, i) => {
       const v = [];
       for (let k = Math.max(0, i - 3); k <= Math.min(lines.length - 1, i + 3); k++) if (ratio[k] != null) v.push(ratio[k]);
       if (v.length < 2) return globalPace;
       v.sort((a, b) => a - b);
-      return Math.min(420, Math.max(140, v[v.length >> 1]));
+      return Math.min(PACE_MAX, Math.max(PACE_MIN, pctl(v, 0.35)));
     });
   }
 
   /** Cuánto dura el relleno de una línea: lo que tarda en cantarse, sin pasar del hueco hasta la siguiente. */
   function fillDuration(gapMs, totalUnits, paceMs) {
     const expected = totalUnits * paceMs;
-    // Línea cantada de corrido: el hueco hasta la siguiente es la duración real (mejor que la estimación por sílabas)
-    if (gapMs <= expected * 1.4) return Math.max(350, gapMs * (gapMs >= expected ? 0.97 : 0.95));
-    return Math.max(350, Math.min(gapMs * 0.95, expected));
+    // Línea cantada de corrido (el hueco es casi lo que dura cantarla): el hueco real es mejor que la estimación
+    if (gapMs <= expected * 1.2) return Math.max(350, gapMs * (gapMs >= expected ? 0.97 : 0.95));
+    // Hueco mucho mayor: después de cantar hay una pausa. El relleno termina con la voz y espera,
+    // en vez de arrastrarse hasta la línea siguiente (es lo que estropeaba las canciones lentas).
+    return Math.max(350, Math.min(gapMs * 0.9, expected));
   }
 
   /** Progreso de la palabra i cuando la letra trae tiempos reales por palabra. */
