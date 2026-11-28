@@ -342,6 +342,15 @@ function setOffset(ms) {
   return next;
 }
 
+/** Al encender o apagar el modo inteligente, se aplica a la canción que ya está sonando. */
+function applySmartMode(on) {
+  if (!smartMgr) return;
+  if (!on) { smartMgr.stop(); return; }
+  if (!state.songKey) return;
+  smartMgr.onTrackStart(state.songKey);
+  if (state.track && state.track.lyrics) smartMgr.onLyrics(state.songKey, timing.cleanIntro(state.track.lyrics));
+}
+
 // ---------- IPC ----------
 function registerIpc() {
   ipcMain.handle('settings:get', () => store.get());
@@ -353,6 +362,7 @@ function registerIpc() {
       next.enabled ? overlay.showInactive() : overlay.hide();
       tray && tray.rebuild();
     }
+    if (next.smartMode !== before.smartMode) applySmartMode(next.smartMode);
     broadcast('settings', next);
     return next;
   });
@@ -417,8 +427,9 @@ app.whenReady().then(() => {
   hotkey('Control+Alt+I', () => {          // interruptor secreto del modo inteligente (experimental)
     const on = !store.get().smartMode;
     store.set({ smartMode: on });
-    if (!on) smartMgr.stop();
-    broadcast('toast', { text: on ? 'Modo inteligente ACTIVADO (se aplica desde la próxima canción)' : 'Modo inteligente desactivado', ms: 3500 });
+    applySmartMode(on);
+    broadcast('settings', store.get());
+    broadcast('toast', { text: on ? 'Modo inteligente activado' : 'Modo inteligente desactivado', ms: 3000 });
   });
   hotkey('Control+Alt+Up', () => send(overlay, 'calibrate'));     // "esta línea empieza AHORA": ajuste exacto
 

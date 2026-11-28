@@ -227,7 +227,7 @@ class SmartManager {
       }
     }
     // 2) Alineación de toda la letra con las entradas de voz (cada ~10 s de audio nuevo, a partir de 45 s)
-    if (s.needAlign && s.hops.length - s.alignedAt >= 350 && s.hops.length >= 2250) {
+    if (s.needAlign && s.hops.length - s.alignedAt >= 350 && s.hops.length >= 1250) {
       s.alignedAt = s.hops.length;
       const hops = this._toHops(s);
       const res = alignByCorrelation(hops, s.lines);

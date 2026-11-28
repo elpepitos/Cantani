@@ -181,7 +181,7 @@ function learnFills(hops, lines, offsetMs = 0, opt = {}) {
  * Devuelve { offsetMs, confidence, z, ratio, lines, apply } (offsetMs: tiempo de letra = tiempo de audio + offsetMs).
  */
 function alignByCorrelation(hops, lines, opt = {}) {
-  const o = { maxShiftMs: 12000, tolMs: 140, minLines: 8, minZ: 5, minRatio: 1.3, minCorrectionMs: 150, minCoverageMs: 40000, ...opt };
+  const o = { maxShiftMs: 12000, tolMs: 140, minLines: 8, minZ: 5, minRatio: 1.3, minCorrectionMs: 150, minCoverageMs: 25000, ...opt };
   const STEP = 20;
   if (!hops || hops.length < 1500) return { reason: 'poco audio' };
   const p0 = hops[0].p, pEnd = hops[hops.length - 1].p;

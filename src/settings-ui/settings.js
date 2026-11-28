@@ -14,6 +14,7 @@
     { title: 'Efectos', controls: [
       { key: 'lightMode', type: 'switch', label: 'Modo ligero (menos CPU y GPU)' },
       { key: 'karaoke', type: 'switch', label: 'Relleno karaoke' },
+      { key: 'smartMode', type: 'switch', label: 'Modo inteligente: ajusta la sincronía escuchando la canción' },
       { key: 'fillLeadMs', type: 'range', label: 'Relleno: adelanto', min: -400, max: 400, step: 10, unit: ' ms' },
       { key: 'fillScalePct', type: 'range', label: 'Relleno: velocidad', min: 70, max: 130, step: 1, fmt: (v) => (v > 100 ? 'más lento ' : v < 100 ? 'más rápido ' : '') + v + '%' },
       { key: 'float', type: 'switch', label: 'Línea flotante' },

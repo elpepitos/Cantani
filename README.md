@@ -66,6 +66,18 @@ Más detalles de cómo funciona la sincronización en [`docs/NOTAS-TECNICAS.md`]
 - Busca la letra sincronizada en **YouTube Music** (servicio no oficial) y en **[LRCLIB](https://lrclib.net)**, una base de letras abierta. Elige la versión cuya duración coincide con la canción.
 - Dibuja la letra en una ventana transparente, siempre encima y sin foco.
 
+## Modo inteligente
+
+Viene activado. Cuando empieza una canción, Cantani escucha el audio del sistema para medir cuándo canta
+la voz y corrige la sincronía de esa canción sin que tengas que tocar nada. Lo que aprende se guarda, así
+que la próxima vez va bien desde el principio.
+
+- El audio se analiza **en tu ordenador** y no se guarda ni se envía a ningún sitio: solo se mide el nivel
+  de sonido, nunca se graba.
+- Si no está seguro, no cambia nada. Y si cambia algo que luego no se confirma, lo deshace solo.
+- Nunca pisa un ajuste hecho a mano con los atajos.
+- Se puede apagar en Ajustes, o con `Ctrl + Alt + I`.
+
 ## Limitaciones
 - Las letras vienen de terceros; algunas canciones (remixes, versiones raras) pueden no tener letra o tenerla desfasada.
 - YouTube Music se consulta con un servicio **no oficial** que podría cambiar o dejar de funcionar en cualquier momento. LRCLIB se usa como respaldo.
