@@ -9,9 +9,10 @@ const path = require('path');
 const { analyze, learnFills, alignByCorrelation, stableAlignment, median } = require('./onset');
 
 const OFFSET_STAGE_MS = 45000;           // tiempo máximo para el ajuste rápido del arranque
-const ALIGN_STAGE_MS = 170000;           // tiempo máximo para alinear toda la letra con el audio
+const ALIGN_STAGE_MS = 10 * 60 * 1000;   // se sigue intentando alinear mientras dure la canción
 const MAX_CAPTURE_MS = 12 * 60 * 1000;   // tope de seguridad por canción
 const RETRY_AFTER_MS = 7 * 24 * 3600 * 1000;
+const SOFT_TRIES = 3;                    // un resultado no concluyente se reintenta las próximas veces que suene
 const GOOD_COVERAGE = 0.7;               // si ya hay tanto aprendido, no se vuelve a escuchar
 const MIN_FILL_COVERAGE = 0.5;           // por debajo de esto el relleno medido no es fiable: se usa el de siempre
 const MIN_FILL_LINES = 8;
@@ -69,7 +70,8 @@ class SmartManager {
     this.offsetNote = ''; this.learnNote = '';
     if (!this.o.enabled() || !key) { this.status = this.o.enabled() ? 'sin canción' : 'inactivo'; return; }
     const prev = this.db[key];
-    const needOffset = !this.o.hasManual(key) && !(prev && Date.now() - prev.at < RETRY_AFTER_MS);
+    const blocked = prev && (prev.soft ? (prev.fails || 1) >= SOFT_TRIES : Date.now() - prev.at < RETRY_AFTER_MS);
+    const needOffset = !this.o.hasManual(key) && !blocked;
     const f = this.fills[key];
     const needFills = !(f && f.coverage >= GOOD_COVERAGE && f.fills.length >= MIN_FILL_LINES);
     if (prev) this.offsetNote = prev.applied ? `${prev.offsetMs} ms (ya analizada)` : `sin cambios (${prev.reason})`;
@@ -97,6 +99,14 @@ class SmartManager {
   onPosition(now, posMs, playing) {
     const s = this.s;
     if (!s || s.done) return;
+    // La misma canción empezada otra vez (no hay cambio de pista): se reinicia el análisis
+    if (s.lastPos != null && posMs < 3000 && s.lastPos - posMs > 15000) {
+      const key = s.key, lines = s.lines;
+      this.onTrackStart(key);
+      if (this.s && lines) this.onLyrics(key, lines);
+      return;
+    }
+    s.lastPos = posMs;
     s.log.push({ t: now, c: posMs - now, pl: !!playing });
     if (s.log.length > 4000) s.log.shift();
     if (s.needOffset && playing) {                      // un salto de posición estropea solo el ajuste rápido del arranque
@@ -183,7 +193,9 @@ class SmartManager {
     const s = this.s;
     if (!s || !s.needAlign) return;
     s.needAlign = false; s.needOffset = false;
-    if (!this.db[s.key]) { this.db[s.key] = { at: Date.now(), applied: false, reason: 'no se pudo alinear' }; this._save(this.file, this.db); }
+    const was = this.db[s.key];
+    this.db[s.key] = { at: Date.now(), applied: false, soft: true, fails: ((was && was.fails) || 0) + 1, reason: 'no se pudo alinear' };
+    this._save(this.file, this.db);
     if (!this.offsetNote) this.offsetNote = 'sin cambios (no se pudo alinear)';
   }
 

@@ -118,3 +118,32 @@ console.log('smart-manager OK', applied, f.length, 'líneas');
   last.forEach((f) => assert.ok(Math.abs(f.dur - 2200) <= 160 && Math.abs(f.lead - 200) <= 160, 'medida ' + JSON.stringify(f)));
   console.log('relleno en vivo OK', sent.map((x) => x.length).join('→'));
 }
+
+// Volver a poner la MISMA canción reinicia el análisis, y un resultado no concluyente se reintenta
+{
+  const ipc = new EventEmitter();
+  const w = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
+  class BW5 { constructor() { w.dead = false; return w; } }
+  const m = new SmartManager({ BrowserWindow: BW5, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
+    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'sm5-')), log: () => {}, hasManual: () => false, getOffset: () => 0, enabled: () => true, apply: () => {} });
+  const L = [{ t: 1000, text: 'a' }, { t: 5000, text: 'b' }];
+  m.onTrackStart('t|x'); m.onLyrics('t|x', L);
+  const first = m.s;
+  m.onPosition(1, 90000, true);
+  m.onPosition(2, 500, true);                       // volvió al principio
+  assert.ok(m.s && m.s !== first, 'sesión reiniciada');
+  assert.ok(m.s.lines === L, 'conserva la letra tras reiniciar');
+  // resultado no concluyente: se vuelve a intentar enseguida
+  m.db['t|x'] = { at: Date.now(), applied: false, soft: true, fails: 1, reason: 'no se pudo alinear' };
+  m.onTrackStart('t|x');
+  assert.ok(m.s && m.s.needAlign, 'reintenta un resultado no concluyente');
+  // tras varios intentos fallidos deja de insistir
+  m.db['t|x'] = { at: Date.now(), applied: false, soft: true, fails: 3, reason: 'no se pudo alinear' };
+  m.onTrackStart('t|x');
+  assert.ok(!m.s || !m.s.needAlign, 'deja de insistir tras 3 intentos');
+  // resultado firme: no se repite
+  m.db['t|x'] = { at: Date.now(), applied: true, offsetMs: -2340 };
+  m.onTrackStart('t|x');
+  assert.ok(!m.s || !m.s.needAlign, 'no repite un ajuste ya comprobado');
+  console.log('reinicio y reintento OK');
+}
