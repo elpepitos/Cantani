@@ -127,6 +127,24 @@ class SmartManager {
 
   stop() { this._finish(); }
 
+  /** Datos medidos (para depurar con audio real): posición, nivel de voz y nivel total, más la letra usada. */
+  dump() {
+    const s = this.s || this.last;
+    if (!s || !s.hops || s.hops.length < 50) return null;
+    const hops = this._toHops(s);
+    if (!hops.length) return null;
+    return {
+      key: s.key,
+      offsetMs: this.o.getOffset(s.key),
+      lines: (s.lines || []).map((l) => ({ t: l.t, n: (l.text || '').length })),   // solo tiempos y longitud, sin la letra
+      hopMs: 20,
+      p0: Math.round(hops[0].p),
+      v: hops.map((h) => Math.round(2000 * Math.log10(h.v + 1e-5)) / 100),         // dB con 2 decimales
+      a: hops.map((h) => Math.round(2000 * Math.log10(h.a + 1e-5)) / 100),
+      p: hops.map((h) => Math.round(h.p))
+    };
+  }
+
   // ---- interno ----
   _checkDone() {
     const s = this.s;
@@ -294,6 +312,7 @@ class SmartManager {
   _finish() {
     const s = this.s;
     this.s = null;
+    if (s && s.hops && s.hops.length > 50) this.last = s;   // se conserva para poder guardar los datos después
     if (s && !s.done) {
       s.done = true;
       try {

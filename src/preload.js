@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   onCalibrate: (cb) => on('calibrate', cb),
   onCalibrateFirst: (cb) => on('calibrateFirst', cb),
   copyReport: () => ipcRenderer.invoke('report:copy'),
+  dumpSmart: () => ipcRenderer.invoke('smart:dump'),
   onDiag: (cb) => on('diag', cb),
   setOffset: (ms) => ipcRenderer.invoke('offset:set', ms),
   adjustOffset: (delta) => ipcRenderer.invoke('offset:adjust', delta),

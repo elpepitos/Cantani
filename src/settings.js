@@ -19,7 +19,7 @@ const DEFAULTS = {
   maxWidthPct: 42,
   animSpeed: 650,
   lightMode: true,
-  smartMode: true,
+  smartMode: false,
   karaoke: true,
   fillLeadMs: 0,
   fillScalePct: 100,

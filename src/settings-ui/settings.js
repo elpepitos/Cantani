@@ -156,6 +156,13 @@
   const diagEl = document.getElementById('diag');
   const rb = document.getElementById('copyReport');
   if (rb) rb.addEventListener('click', async () => { await window.api.copyReport(); rb.textContent = '¡Copiado! Pégalo en el chat (Ctrl+V)'; setTimeout(() => { rb.textContent = 'Copiar informe (para mandarlo a quien te ayuda)'; }, 3500); });
+  const db = document.getElementById('dumpSmart');
+  if (db) db.addEventListener('click', async () => {
+    db.disabled = true;
+    const r = await window.api.dumpSmart();
+    db.textContent = r && r.ok ? 'Guardado: ' + r.file.split(/[\\/]/).pop() + ' (' + Math.round(r.bytes / 1024) + ' KB)' : (r && r.error) || 'No se pudo guardar';
+    setTimeout(() => { db.textContent = 'Guardar datos del modo inteligente (en el Escritorio)'; db.disabled = false; }, 6000);
+  });
   const fmt = (ms) => (ms == null ? '—' : `${(ms / 1000).toFixed(1)} s`);
   window.api.onDiag((d) => {
     const dur = d.durationMs ? d.durationMs / 1000 : 0;

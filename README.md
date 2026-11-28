@@ -68,7 +68,7 @@ Más detalles de cómo funciona la sincronización en [`docs/NOTAS-TECNICAS.md`]
 
 ## Modo inteligente
 
-Viene activado. Cuando empieza una canción, Cantani escucha el audio del sistema para medir cuándo canta
+Se activa en Ajustes (está en pruebas). Cuando empieza una canción, Cantani escucha el audio del sistema para medir cuándo canta
 la voz y corrige la sincronía de esa canción sin que tengas que tocar nada. Lo que aprende se guarda, así
 que la próxima vez va bien desde el principio.
 

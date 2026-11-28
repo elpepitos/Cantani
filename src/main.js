@@ -377,6 +377,18 @@ function registerIpc() {
     screen.getAllDisplays().map((d, i) => ({ index: i, label: `Pantalla ${i + 1} (${d.bounds.width}×${d.bounds.height})${d.id === screen.getPrimaryDisplay().id ? ' — principal' : ''}` }))
   );
   ipcMain.handle('report:copy', () => { const r = buildReport(); clipboard.writeText(r); return r.length; });
+  ipcMain.handle('smart:dump', () => {
+    try {
+      const d = smartMgr && smartMgr.dump();
+      if (!d) return { ok: false, error: 'Todavía no hay datos: pon una canción con el modo inteligente activado y espera medio minuto.' };
+      const fs = require('fs');
+      const name = 'cantani-datos-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.json';
+      let dir; try { dir = app.getPath('desktop'); } catch { dir = app.getPath('userData'); }
+      const file = path.join(dir, name);
+      fs.writeFileSync(file, JSON.stringify({ ...d, report: buildReport() }));
+      return { ok: true, file, bytes: fs.statSync(file).size };
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
   ipcMain.handle('state:get', () => ({ track: demo.on ? { active: true, title: 'Modo demostración', artist: 'Lyrics Overlay', lyricsState: 'found', demo: true } : { ...publicTrack(), lyrics: undefined }, detector: state.detector, demo: demo.on, songOffsetMs: state.songOffsetMs }));
   ipcMain.handle('offset:adjust', (_e, delta) => adjustOffset(Number(delta) || 0));
   ipcMain.handle('offset:reset', () => adjustOffset(0, true));
