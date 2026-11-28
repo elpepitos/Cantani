@@ -166,9 +166,9 @@
       // Tiempos medidos del audio: empieza cuando entra la voz y dura lo que de verdad se canta.
       // Se limitan contra la estimación de siempre: una medida rara no puede dejar la línea mucho peor.
       const L = info.learned;
-      const lo = info.fillMs * 0.5, hi = info.fillMs * 1.8;
+      const lo = info.fillMs * 0.4, hi = info.fillMs * 2.5;
       const dur = Math.min(hi, Math.max(lo, L.dur));
-      const lead2 = Math.max(-600, Math.min(900, L.lead));
+      const lead2 = Math.max(-1200, Math.min(1500, L.lead));
       const doneL = clamp((pos + lead - (lines[j].t + lead2)) / dur, 0, 1) * info.total;
       for (const w of info.list) setWp(w, T.wordProgress(w, doneL));
       return;

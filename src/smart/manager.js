@@ -6,7 +6,8 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { analyze, learnFills, alignByCorrelation, stableAlignment, median } = require('./onset');
+const { analyze, median } = require('./onset');
+const { voiceSegments, matchLines } = require('./align');
 
 const OFFSET_STAGE_MS = 45000;           // tiempo máximo para el ajuste rápido del arranque
 const ALIGN_STAGE_MS = 10 * 60 * 1000;   // se sigue intentando alinear mientras dure la canción
@@ -121,7 +122,6 @@ class SmartManager {
     if (s.needOffset && now - s.startedAt > OFFSET_STAGE_MS) s.needOffset = false;
     if (s.needAlign && now - s.startedAt > ALIGN_STAGE_MS) this._giveUpAlign();
     if (now - s.startedAt > MAX_CAPTURE_MS) { this._finish(); return; }
-    this._liveFills(s);
     this._checkDone();
   }
 
@@ -231,7 +231,7 @@ class SmartManager {
 
   _maybeAnalyzeOffset() {
     const s = this.s;
-    if (!s || s.done || !(s.needOffset || s.needAlign) || !s.lines || s.hops.length < 100 || s.log.length < 8) return;
+    if (!s || s.done || !(s.needOffset || s.needAlign || s.needFills) || !s.lines || s.hops.length < 100 || s.log.length < 8) return;
     const live = this.o.enabled() && !this.o.hasManual(s.key);
     // 1) Ajuste rápido: entrada de la voz frente a la primera línea (solo si hay calma antes de cantar)
     if (s.needOffset && s.firstLineMs != null) {
@@ -244,26 +244,52 @@ class SmartManager {
         if (res.reason === 'ya va bien') { this._decide(s, { applied: false, reason: 'ya va bien' }, 'sin cambios (ya iba bien)'); return; }
       }
     }
-    // 2) Alineación de toda la letra con las entradas de voz (cada ~10 s de audio nuevo, a partir de 45 s)
-    if (s.needAlign && s.hops.length - s.alignedAt >= 350 && s.hops.length >= 1250) {
+    // 2) Alineación por tramos de voz: se detecta dónde canta alguien y se empareja con las líneas.
+    //    Da el desfase de la canción y, de paso, la duración real de cada línea para el karaoke.
+    if ((s.needAlign || s.needFills) && s.hops.length - s.alignedAt >= 350 && s.hops.length >= 1250) {
       s.alignedAt = s.hops.length;
       const hops = this._toHops(s);
-      const res = alignByCorrelation(hops, s.lines);
-      this.o.log(`modo inteligente (alineación): ${JSON.stringify(res)}`);
-      if (s.applied) { this._verify(s, res); return; }
-      if (Number.isFinite(res.offsetMs) && Number.isFinite(res.z)) s.alignHist.push({ offsetMs: res.offsetMs, z: res.z, ratio: res.ratio });
-      const rep = res.apply ? res : stableAlignment(s.alignHist);          // una pasada clara, o varias pasadas que coinciden
-      if (rep && rep.apply && live) {
-        // Se aplica EN PRUEBAS: las siguientes mediciones, con más audio, tienen que confirmarlo o se deshace.
-        s.applied = { ms: rep.offsetMs, confidence: rep.confidence, stable: !!rep.stable };
-        this.o.apply(s.key, rep.offsetMs, rep);
-        this.offsetNote = `probando ${rep.offsetMs} ms (confianza ${rep.confidence})`;
+      const segs = voiceSegments(hops);
+      const res = matchLines(segs, s.lines);
+      this.o.log(`modo inteligente (voz): tramos ${segs.length} · ${JSON.stringify({ off: res.offsetMs, cob: res.coverage, sep: res.sep, res: res.residualMs, conf: res.confidence, no: res.reason })}`);
+      s.lastMatch = res.apply ? res : null;
+      if (!s.needAlign) { this._sendFills(s, res); return; }   // el desfase ya está decidido: solo se sigue midiendo el relleno
+      if (s.applied) { this._verify(s, res); this._sendFills(s, res); return; }
+      if (res.apply && live) {
+        s.applied = { ms: res.offsetMs, confidence: res.confidence };
+        this.o.apply(s.key, res.offsetMs, res);
+        this._sendFills(s, res);
+        this.offsetNote = `probando ${res.offsetMs} ms (confianza ${res.confidence})`;
         this.status = 'comprobando el ajuste';
         return;
       }
-      if (res.reason === 'ya va bien') { this._decide(s, { applied: false, reason: 'ya va bien' }, 'sin cambios (ya iba bien)'); return; }
+      if (res.apply && !live) { this._sendFills(s, res); this._decide(s, { applied: false, reason: 'ajuste a mano' }, `medido ${res.offsetMs} ms (respetando tu ajuste)`); return; }
+      if (Math.abs(res.offsetMs || 0) < 150 && res.coverage >= 0.6) { this._sendFills(s, res); this._decide(s, { applied: false, reason: 'ya va bien' }, 'sin cambios (ya iba bien)'); return; }
       this.offsetNote = `buscando… (${res.reason || 'sin datos'})`;
     }
+  }
+
+  /** Manda al overlay la duración medida de cada línea, para que el relleno karaoke siga a la voz. */
+  _sendFills(s, res) {
+    if (!this.o.fills || !res || !res.matched || !s.needFills) return;
+    const off = this.o.getOffset(s.key);
+    const fills = [];
+    res.matched.forEach((x, i) => {
+      if (x.dentro) return;
+      const sig = res.matched[i + 1];
+      // un tramo puede abarcar dos versos seguidos: la línea no puede durar más que hasta la siguiente
+      const tope = sig ? sig.s - x.s - 120 : Infinity;
+      const dur = Math.round(Math.min(x.e - x.s, tope));
+      if (dur < 300) return;
+      fills.push({ t: x.t, lead: Math.round((x.s + off - x.t) / 10) * 10, dur });
+    });
+    if (fills.length < MIN_FILL_LINES || fills.length <= s.sent) return;
+    s.sent = fills.length;
+    const coverage = res.lines ? fills.length / res.lines : 0;
+    this.o.fills(s.key, fills);
+    this.fills[s.key] = { at: Date.now(), coverage: +coverage.toFixed(2), fills };
+    this._save(this.fillsFile, this.fills);
+    this.learnNote = `${fills.length} líneas medidas (${Math.round(coverage * 100)} %)`;
   }
 
   /**
@@ -289,25 +315,6 @@ class SmartManager {
     }
   }
 
-  /**
-   * Relleno medido en caliente: cada ~20 s de audio se recalcula y se manda al overlay, para que la
-   * segunda mitad de la canción ya vaya con tiempos medidos sin esperar a la próxima vez que suene.
-   */
-  _liveFills(s) {
-    if (!s.needFills || !s.lines || !s.lines.length || !this.o.fills) return;
-    if (s.needOffset || s.needAlign || s.applied) return;         // hasta que la letra no esté alineada, medir no sirve
-    if (s.hops.length - s.learnedAt < 1000 || s.hops.length < 2000) return;
-    s.learnedAt = s.hops.length;
-    try {
-      const r = learnFills(this._toHops(s), s.lines, this.o.getOffset(s.key));
-      if (r.fills.length >= MIN_FILL_LINES && r.fills.length > s.sent) {
-        s.sent = r.fills.length;
-        this.o.fills(s.key, r.fills);
-        this.learnNote = `${r.fills.length} líneas medidas (${Math.round(r.coverage * 100)} %)`;
-      }
-    } catch (err) { this.o.log('modo inteligente (relleno en vivo) falló: ' + err.message); }
-  }
-
   /** Cierra la sesión: si se estaba aprendiendo el relleno, analiza ahora lo escuchado y lo guarda. */
   _finish() {
     const s = this.s;
@@ -315,21 +322,6 @@ class SmartManager {
     if (s && s.hops && s.hops.length > 50) this.last = s;   // se conserva para poder guardar los datos después
     if (s && !s.done) {
       s.done = true;
-      try {
-        if (s.needFills && s.lines && s.lines.length && s.hops.length > 400 && s.log.length > 20) {
-          const hops = this._toHops(s);
-          const r = learnFills(hops, s.lines, this.o.getOffset(s.key));
-          const old = this.fills[s.key];
-          this.o.log(`modo inteligente (relleno): ${r.fills.length}/${r.singable} líneas`);
-          if (r.fills.length >= MIN_FILL_LINES && r.coverage >= MIN_FILL_COVERAGE && (!old || r.coverage > old.coverage)) {
-            this.fills[s.key] = { at: Date.now(), coverage: +r.coverage.toFixed(2), fills: r.fills };
-            this._save(this.fillsFile, this.fills);
-            this.learnNote = `${r.fills.length} líneas aprendidas (${Math.round(r.coverage * 100)} %)`;
-          } else if (!old) {
-            this.learnNote = `no se pudo aprender (${r.fills.length}/${r.singable} líneas claras)`;
-          }
-        }
-      } catch (err) { this.o.log('modo inteligente (relleno) falló: ' + err.message); }
       this.status = 'terminado';
     }
     this._close();

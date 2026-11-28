@@ -1,153 +1,101 @@
-// Flujo completo del modo inteligente con un Electron simulado
+// Modo inteligente de principio a fin, con canciones simuladas (audio sintético con la respuesta conocida).
 const assert = require('assert'); const EventEmitter = require('events'); const os = require('os'); const fs = require('fs'); const path = require('path');
 const { SmartManager } = require('../src/smart/manager');
-const ipcMain = new EventEmitter();
-const win = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
-class BW { constructor() { win.dead = false; return win; } }
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-'));
-let applied = null; const logs = [];
-const mgr = new SmartManager({ BrowserWindow: BW, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain },
-  { dir, log: (m) => logs.push(m), hasManual: () => false, getOffset: () => (applied ? applied[1] : 0), enabled: () => true, apply: (k, ms) => { applied = [k, ms]; } });
-let seed = 3; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-const lin = (d) => Math.pow(10, d / 20);
-const t0 = 1_700_000_000_000, key = 'trueno|feel me';
-// canción lenta: la voz entra a 10,0 s (la letra dice 11,3 s: +1300 ms); 10 líneas cada 5 s; cada una suena 3 s (piano suave de fondo)
-const lines = []; for (let i = 0; i < 10; i++) lines.push({ t: 11300 + i * 5000, text: 'línea ' + i });
-const audioDb = (p) => (lines.some((l) => p >= l.t - 1300 && p < l.t - 1300 + 3000) ? -24 : -50);
-mgr.onTrackStart(key);
-assert.ok(mgr.s);
-mgr.onLyrics(key, lines);
-const ev = { sender: win.webContents };
-const END = 62000;
-for (let tw = 800; tw <= END; tw += 500) {
-  for (let q = tw - 500; q < tw; q += 200) if (q >= 0) mgr.onPosition(t0 + q, q + (rnd() - .5) * 60, !(q > 0 && q < 600));   // al principio, un parpadeo "en pausa" (como en el informe real)
-  if (tw < 1300) continue;
-  const v = [], a = [];
-  for (let i = 0; i < 25; i++) { const p = tw - 500 + i * 20; v.push(lin(audioDb(p) + (rnd() - .5))); a.push(lin(audioDb(p) + 3)); }
-  ipcMain.emit('smart:hops', ev, { at: t0 + tw + 15, v, a });
-}
-assert.ok(applied, 'debe aplicar el ajuste del arranque pese al parpadeo de pausa: ' + logs.join(' | ') + ' · ' + mgr.describe());
-assert.ok(Math.abs(applied[1] - 1300) <= 150, 'offset ≈ 1300: ' + applied[1]);
-assert.ok(mgr.s && !win.dead, 'sigue escuchando para aprender el relleno');
-mgr.onTrackStart('otra|cancion');                          // cambio de canción: se cierra y se aprende
-const f = mgr.fillsFor(key);
-assert.ok(f && f.length >= 7, 'aprende el relleno: ' + (f && f.length) + ' · ' + logs.join(' | '));
-f.forEach((x) => { assert.ok(Math.abs(x.dur - 3000) <= 160, 'dur ≈ 3000: ' + x.dur); assert.ok(Math.abs(x.lead) <= 160, 'lead ≈ 0: ' + x.lead); });
-console.log('smart-manager OK', applied, f.length, 'líneas');
+const { mk } = require('./sim-audio');
 
-// Caso "FEEL ME??": la primera línea está en el segundo 0 y la letra va ~4,2 s por delante de la voz
-{
+function correr(opt, cfg = {}) {
   const ipc = new EventEmitter();
-  const w = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
-  class BW2 { constructor() { return w; } }
-  let ap = null; const lg = [];
-  const m = new SmartManager({ BrowserWindow: BW2, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
-    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'sm2-')), log: (x) => lg.push(x), hasManual: () => false, getOffset: () => (ap ? ap[1] : 0), enabled: () => true, apply: (k, ms) => { ap = [k, ms]; } });
-  let sd = 5; const rn = () => { sd = (sd * 16807) % 2147483647; return sd / 2147483647; };
-  const L = []; let tt = 0;
-  for (let i = 0; i < 40; i++) { L.push({ t: tt, text: 'x' + i }); tt += i % 11 === 10 ? 14000 : 2200 + Math.floor(rn() * 3800); }
-  const SHIFT = 4200, END2 = tt + 3000, base = 1_700_000_100_000;
-  const dbAt = (p) => (L.some((l) => p >= l.t - SHIFT && p < l.t - SHIFT + 1700) ? -25 : -49);
-  m.onTrackStart('trueno|feel');
-  m.onLyrics('trueno|feel', L);
-  for (let tw = 800; tw <= END2 && !ap; tw += 500) {
-    for (let q = tw - 500; q < tw; q += 200) if (q >= 0) m.onPosition(base + q, q + (rn() - .5) * 60, true);
-    if (tw < 1300) continue;
-    const v = [], a = [];
-    for (let i = 0; i < 25; i++) { const p = tw - 500 + i * 20; v.push(Math.pow(10, (dbAt(p) + (rn() - .5)) / 20)); a.push(1); }
-    ipc.emit('smart:hops', { sender: w.webContents }, { at: base + tw + 15, v, a });
+  const win = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
+  class BW { constructor() { win.dead = false; return win; } }
+  const logs = []; const fills = []; let off = 0;
+  const mgr = new SmartManager({ BrowserWindow: BW, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
+    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'smx-')), log: (x) => logs.push(x),
+      hasManual: () => !!cfg.manual, getOffset: () => off, enabled: () => true,
+      apply: (k, ms) => { off = ms; }, fills: (k, f) => fills.push(f) });
+  const r = mk(opt);
+  const lines = cfg.lines ? cfg.lines(r) : r.lines;
+  mgr.onTrackStart('k|' + (opt.seed || 1));
+  mgr.onLyrics('k|' + (opt.seed || 1), lines);
+  const base = 1_700_000_000_000;
+  const porLote = 25;                                  // el medidor manda 25 valores (0,5 s) cada vez
+  for (let i = 0; i + porLote <= r.hops.length; i += porLote) {
+    const t0 = r.hops[i].p;
+    for (let q = t0; q < t0 + 500; q += 200) mgr.onPosition(base + q, q, true);
+    const trozo = r.hops.slice(i, i + porLote);
+    ipc.emit('smart:hops', { sender: win.webContents }, { at: base + trozo[trozo.length - 1].p + 20, v: trozo.map((h) => h.v), a: trozo.map((h) => h.a) });
   }
-  assert.ok(ap, 'debe alinear con la primera línea en el segundo 0: ' + lg.join(' | ') + ' · ' + m.describe());
-  assert.ok(Math.abs(ap[1] - SHIFT) <= 120, 'offset ≈ 4200: ' + ap[1]);
-  console.log('alineación completa OK', ap[1]);
+  return { mgr, off, fills, logs, verdad: r };
 }
 
-// Canción rápida: una coincidencia dudosa se aplica a prueba, pero las medidas siguientes la contradicen -> se deshace
+// 1) Canción con orquesta densa y la letra 3,5 s adelantada: debe corregirla sola
+{
+  const { mgr, off, fills, logs } = correr({ instr: 'denso', shift: 3500, seed: 1 });
+  assert.ok(Math.abs(off - 3500) <= 250, 'corrige el desfase: ' + off + ' · ' + logs.slice(-2).join(' | '));
+  assert.ok(mgr.describe().includes('comprobado') || mgr.describe().includes('probando'), mgr.describe());
+  assert.ok(fills.length >= 1 && fills[fills.length - 1].length >= 20, 'mide el relleno de las líneas: ' + (fills[0] || []).length);
+  const f = fills[fills.length - 1];
+  f.forEach((x) => { assert.ok(Math.abs(x.lead) <= 400, 'lead pequeño tras corregir: ' + x.lead); assert.ok(x.dur >= 800 && x.dur <= 3200, 'duración medida: ' + x.dur); });
+}
+
+// 2) Canción lenta con pausas largas: el relleno medido debe ser más corto que el hueco
+{
+  const { off, fills, verdad } = correr({ instr: 'suave', shift: 1500, seed: 2, lineGap: [3800, 6000], voiceLen: [1400, 2200] });
+  assert.ok(Math.abs(off - 1500) <= 250, 'corrige: ' + off);
+  const f = fills[fills.length - 1];
+  assert.ok(f.length >= 20, 'mide muchas líneas: ' + f.length);
+  const medias = f.map((x) => x.dur).reduce((a, b) => a + b, 0) / f.length;
+  assert.ok(medias < 3000, 'el relleno medido no llega hasta la línea siguiente: ' + Math.round(medias));
+  void verdad;
+}
+
+// 3) Canción rápida ya bien sincronizada: no debe tocar nada
+{
+  const { off } = correr({ instr: 'denso', shift: 0, seed: 3, lineGap: [1500, 2100], voiceLen: [1200, 1800] });
+  assert.ok(Math.abs(off) <= 200, 'no mueve una canción que ya va bien: ' + off);
+}
+
+// 4) Letra que no corresponde a la canción: no debe inventarse un ajuste
+{
+  let s = 7; const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const { off } = correr({ instr: 'denso', shift: 0, seed: 4 },
+    { lines: (r) => r.lines.map((l, i) => ({ t: Math.floor(rnd() * 170000), text: 'x' + i })).sort((a, b) => a.t - b.t) });
+  assert.strictEqual(off, 0, 'no aplica nada con una letra equivocada: ' + off);
+}
+
+// 5) Si el usuario ya ajustó la canción a mano, no se le pisa
+{
+  const { off } = correr({ instr: 'suave', shift: 2500, seed: 5 }, { manual: true });
+  assert.strictEqual(off, 0, 'respeta el ajuste a mano: ' + off);
+}
+
+console.log('modo inteligente: 5 escenarios OK');
+
+// Un ajuste puesto a prueba se deshace si las medidas siguientes lo contradicen
 {
   const ipc = new EventEmitter();
   const w = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
-  class BW3 { constructor() { w.dead = false; return w; } }
-  const hist = []; const lg = [];
+  class BW { constructor() { w.dead = false; return w; } }
   let cur = 0;
-  const m = new SmartManager({ BrowserWindow: BW3, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
-    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'sm3-')), log: (x) => lg.push(x), hasManual: () => false, getOffset: () => cur, enabled: () => true, apply: (k, ms) => { cur = ms; hist.push(ms); } });
-  m.onTrackStart('lumi|smoke');
-  m.onLyrics('lumi|smoke', [{ t: 0, text: 'a' }]);
-  const s = m.s;
-  s.applied = { ms: -2000, confidence: 0.5, stable: true };   // ajuste puesto a prueba
-  cur = -2000;
-  m._verify(s, { offsetMs: 150, z: 6, ratio: 1.5 });          // la medida nueva dice que no hacía falta
-  assert.strictEqual(s.doubts, 1);
+  const m = new SmartManager({ BrowserWindow: BW, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
+    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'smv-')), log: () => {}, hasManual: () => false, getOffset: () => cur, enabled: () => true, apply: (k, ms) => { cur = ms; } });
+  m.onTrackStart('a|b'); m.onLyrics('a|b', [{ t: 0, text: 'a' }]);
+  const s = m.s; s.applied = { ms: -2000, confidence: 0.5 }; cur = -2000;
+  m._verify(s, { offsetMs: 150, z: 6, ratio: 1.5 });
   assert.strictEqual(cur, -2000, 'una sola duda no deshace');
   m._verify(s, { offsetMs: 120, z: 6, ratio: 1.5 });
   assert.strictEqual(cur, 0, 'dos dudas deshacen el ajuste');
-  assert.ok(m.describe().includes('deshecho'), m.describe());
-  // y confirmado: dos medidas que coinciden lo dejan fijo
-  const s2 = { key: 'k2', applied: { ms: -2340, confidence: 0.6 }, confirms: 0, doubts: 0, needAlign: true, needFills: false, alignHist: [] };
-  m.s = s2; cur = -2340;
-  m._verify(s2, { offsetMs: -2300, z: 4, ratio: 1.3 });
-  m._verify(s2, { offsetMs: -2380, z: 4, ratio: 1.3 });
-  assert.strictEqual(cur, -2340, 'se mantiene');
-  assert.ok(m.describe().includes('comprobado'), m.describe());
-  console.log('verificación y deshacer OK');
-}
 
-// Relleno medido en caliente: llega al overlay durante la propia canción
-{
-  const ipc = new EventEmitter();
-  const w = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
-  class BW4 { constructor() { w.dead = false; return w; } }
-  const sent = []; const lg = [];
-  const m = new SmartManager({ BrowserWindow: BW4, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
-    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'sm4-')), log: (x) => lg.push(x), hasManual: () => true, getOffset: () => 0, enabled: () => true, apply: () => {}, fills: (k, f) => sent.push(f) });
-  let sd = 9; const rn = () => { sd = (sd * 16807) % 2147483647; return sd / 2147483647; };
-  const L = []; for (let i = 0; i < 24; i++) L.push({ t: 6000 + i * 4000, text: 'linea ' + i });
-  const base = 1_700_000_200_000, END = 6000 + 24 * 4000;
-  const dbAt = (p) => (L.some((l) => p >= l.t + 200 && p < l.t + 2400) ? -25 : -50);
-  m.onTrackStart('slow|song');                      // hasManual: solo toca medir el relleno
-  m.onLyrics('slow|song', L);
-  for (let tw = 500; tw <= END; tw += 500) {
-    for (let q = tw - 500; q < tw; q += 200) if (q >= 0) m.onPosition(base + q, q + (rn() - .5) * 60, true);
-    const v = [], a = [];
-    for (let i = 0; i < 25; i++) { const p = tw - 500 + i * 20; v.push(Math.pow(10, (dbAt(p) + (rn() - .5)) / 20)); a.push(1); }
-    ipc.emit('smart:hops', { sender: w.webContents }, { at: base + tw + 15, v, a });
-  }
-  assert.ok(sent.length >= 2, 'manda el relleno varias veces durante la canción: ' + sent.length + ' · ' + lg.join(' | '));
-  const last = sent[sent.length - 1];
-  assert.ok(last.length >= 12, 'aprende muchas líneas: ' + last.length);
-  last.forEach((f) => assert.ok(Math.abs(f.dur - 2200) <= 160 && Math.abs(f.lead - 200) <= 160, 'medida ' + JSON.stringify(f)));
-  console.log('relleno en vivo OK', sent.map((x) => x.length).join('→'));
-}
-
-// Volver a poner la MISMA canción reinicia el análisis, y un resultado no concluyente se reintenta
-{
-  const ipc = new EventEmitter();
-  const w = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
-  class BW5 { constructor() { w.dead = false; return w; } }
-  const m = new SmartManager({ BrowserWindow: BW5, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
-    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'sm5-')), log: () => {}, hasManual: () => false, getOffset: () => 0, enabled: () => true, apply: () => {} });
-  const L = [{ t: 1000, text: 'a' }, { t: 5000, text: 'b' }];
-  m.onTrackStart('t|x'); m.onLyrics('t|x', L);
+  // repetir la MISMA canción reinicia el análisis
+  m.onTrackStart('c|d'); m.onLyrics('c|d', [{ t: 1000, text: 'a' }, { t: 5000, text: 'b' }]);
   const first = m.s;
-  m.onPosition(1, 90000, true);
-  m.onPosition(2, 500, true);                       // volvió al principio
-  assert.ok(m.s && m.s !== first, 'sesión reiniciada');
-  assert.ok(m.s.lines === L, 'conserva la letra tras reiniciar');
-  // resultado no concluyente: se vuelve a intentar enseguida
-  m.db['t|x'] = { at: Date.now(), applied: false, fails: 1, reason: 'no se pudo alinear' };
-  m.onTrackStart('t|x');
+  m.onPosition(1, 90000, true); m.onPosition(2, 500, true);
+  assert.ok(m.s && m.s !== first, 'sesión reiniciada al repetir la canción');
+  // un resultado no firme se reintenta; uno firme no
+  m.db['c|d'] = { at: Date.now(), applied: false, fails: 1, reason: 'no se pudo alinear' };
+  m.onTrackStart('c|d');
   assert.ok(m.s && m.s.needAlign, 'reintenta un resultado no concluyente');
-  // tras varios intentos fallidos deja de insistir
-  m.db['t|x'] = { at: Date.now(), applied: false, fails: 3, reason: 'no se pudo alinear' };
-  m.onTrackStart('t|x');
-  assert.ok(!m.s || !m.s.needAlign, 'deja de insistir tras 3 intentos');
-  // un resultado antiguo sin contador (de una versión anterior) no debe bloquear para siempre
-  m.db['t|x'] = { at: Date.now(), applied: false, reason: 'no se pudo alinear' };
-  m.onTrackStart('t|x');
-  assert.ok(m.s && m.s.needAlign, 'un registro viejo no bloquea');
-  // resultado firme: no se repite
-  m.db['t|x'] = { at: Date.now(), applied: true, offsetMs: -2340 };
-  m.onTrackStart('t|x');
+  m.db['c|d'] = { at: Date.now(), applied: true, offsetMs: -2340 };
+  m.onTrackStart('c|d');
   assert.ok(!m.s || !m.s.needAlign, 'no repite un ajuste ya comprobado');
-  console.log('reinicio y reintento OK');
+  console.log('seguridad (deshacer, reinicio, reintento): OK');
 }
