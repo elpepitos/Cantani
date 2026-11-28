@@ -76,7 +76,7 @@ class SmartManager {
     else if (this.o.hasManual(key)) this.offsetNote = 'omitido (ajuste a mano)';
     if (f) this.learnNote = `${f.fills.length} líneas aprendidas (${Math.round(f.coverage * 100)} %)`;
     if (!needOffset && !needFills) { this.status = 'canción ya aprendida'; return; }
-    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needAlign: needOffset, alignedAt: 0, alignHist: [], applied: null, confirms: 0, doubts: 0, needFills, done: false };
+    this.s = { key, startedAt: Date.now(), hops: [], log: [], lines: null, firstLineMs: null, needOffset, needAlign: needOffset, alignedAt: 0, alignHist: [], applied: null, confirms: 0, doubts: 0, learnedAt: 0, sent: 0, needFills, done: false };
     this.status = 'arrancando captura';
     this._openWindow();
   }
@@ -108,8 +108,9 @@ class SmartManager {
     }
     if (s.needOffset && now - s.startedAt > OFFSET_STAGE_MS) s.needOffset = false;
     if (s.needAlign && now - s.startedAt > ALIGN_STAGE_MS) this._giveUpAlign();
-    if (now - s.startedAt > MAX_CAPTURE_MS) this._finish();
-    else this._checkDone();
+    if (now - s.startedAt > MAX_CAPTURE_MS) { this._finish(); return; }
+    this._liveFills(s);
+    this._checkDone();
   }
 
   stop() { this._finish(); }
@@ -252,6 +253,25 @@ class SmartManager {
       s.applied = null;
       this._decide(s, { applied: false, reason: 'medidas contradictorias' }, 'deshecho (las medidas no coincidían)');
     }
+  }
+
+  /**
+   * Relleno medido en caliente: cada ~20 s de audio se recalcula y se manda al overlay, para que la
+   * segunda mitad de la canción ya vaya con tiempos medidos sin esperar a la próxima vez que suene.
+   */
+  _liveFills(s) {
+    if (!s.needFills || !s.lines || !s.lines.length || !this.o.fills) return;
+    if (s.needOffset || s.needAlign || s.applied) return;         // hasta que la letra no esté alineada, medir no sirve
+    if (s.hops.length - s.learnedAt < 1000 || s.hops.length < 2000) return;
+    s.learnedAt = s.hops.length;
+    try {
+      const r = learnFills(this._toHops(s), s.lines, this.o.getOffset(s.key));
+      if (r.fills.length >= MIN_FILL_LINES && r.fills.length > s.sent) {
+        s.sent = r.fills.length;
+        this.o.fills(s.key, r.fills);
+        this.learnNote = `${r.fills.length} líneas medidas (${Math.round(r.coverage * 100)} %)`;
+      }
+    } catch (err) { this.o.log('modo inteligente (relleno en vivo) falló: ' + err.message); }
   }
 
   /** Cierra la sesión: si se estaba aprendiendo el relleno, analiza ahora lo escuchado y lo guarda. */

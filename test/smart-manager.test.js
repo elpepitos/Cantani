@@ -91,3 +91,30 @@ console.log('smart-manager OK', applied, f.length, 'líneas');
   assert.ok(m.describe().includes('comprobado'), m.describe());
   console.log('verificación y deshacer OK');
 }
+
+// Relleno medido en caliente: llega al overlay durante la propia canción
+{
+  const ipc = new EventEmitter();
+  const w = { webContents: {}, isDestroyed() { return !!this.dead; }, destroy() { this.dead = true; }, removeMenu() {}, loadFile() {}, on() {} };
+  class BW4 { constructor() { w.dead = false; return w; } }
+  const sent = []; const lg = [];
+  const m = new SmartManager({ BrowserWindow: BW4, session: { defaultSession: { setDisplayMediaRequestHandler() {} } }, desktopCapturer: {}, ipcMain: ipc },
+    { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'sm4-')), log: (x) => lg.push(x), hasManual: () => true, getOffset: () => 0, enabled: () => true, apply: () => {}, fills: (k, f) => sent.push(f) });
+  let sd = 9; const rn = () => { sd = (sd * 16807) % 2147483647; return sd / 2147483647; };
+  const L = []; for (let i = 0; i < 24; i++) L.push({ t: 6000 + i * 4000, text: 'linea ' + i });
+  const base = 1_700_000_200_000, END = 6000 + 24 * 4000;
+  const dbAt = (p) => (L.some((l) => p >= l.t + 200 && p < l.t + 2400) ? -25 : -50);
+  m.onTrackStart('slow|song');                      // hasManual: solo toca medir el relleno
+  m.onLyrics('slow|song', L);
+  for (let tw = 500; tw <= END; tw += 500) {
+    for (let q = tw - 500; q < tw; q += 200) if (q >= 0) m.onPosition(base + q, q + (rn() - .5) * 60, true);
+    const v = [], a = [];
+    for (let i = 0; i < 25; i++) { const p = tw - 500 + i * 20; v.push(Math.pow(10, (dbAt(p) + (rn() - .5)) / 20)); a.push(1); }
+    ipc.emit('smart:hops', { sender: w.webContents }, { at: base + tw + 15, v, a });
+  }
+  assert.ok(sent.length >= 2, 'manda el relleno varias veces durante la canción: ' + sent.length + ' · ' + lg.join(' | '));
+  const last = sent[sent.length - 1];
+  assert.ok(last.length >= 12, 'aprende muchas líneas: ' + last.length);
+  last.forEach((f) => assert.ok(Math.abs(f.dur - 2200) <= 160 && Math.abs(f.lead - 200) <= 160, 'medida ' + JSON.stringify(f)));
+  console.log('relleno en vivo OK', sent.map((x) => x.length).join('→'));
+}

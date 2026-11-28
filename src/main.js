@@ -386,6 +386,11 @@ app.whenReady().then(() => {
     hasManual: (k) => offsets.has(k),
     getOffset: (k) => offsets.get(k),
     enabled: () => !!store.get().smartMode,
+    fills: (k, f) => {
+      if (state.songKey !== k) return;
+      state.track.fills = f;
+      broadcast('fills', { fills: f });
+    },
     apply: (k, ms, info) => {
       if (state.songKey !== k) return;
       state.songOffsetMs = ms; offsets.set(k, ms);

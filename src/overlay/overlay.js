@@ -283,6 +283,12 @@
     window.api.setOffset(window.LyricsTiming.calibratedOffset(lines[0].t, base, 180, 60000));
   });
 
+  // El modo inteligente manda tiempos medidos del audio mientras suena la canción
+  window.api.onFills((d) => {
+    const map = new Map(((d && d.fills) || []).map((f) => [f.t, f]));
+    if (!map.size) return;
+    lines.forEach((l, j) => { const f = map.get(l.t); if (f && words[j] && !words[j].real) words[j].learned = f; });
+  });
   window.api.onToast((d) => toast(String(d.text || ''), d.ms || 3000));
   window.api.onOffset((d) => {
     songOffset = d.songOffsetMs || 0;
